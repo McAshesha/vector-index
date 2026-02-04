@@ -1,4 +1,4 @@
-# Vector Index Bench
+# Vector Index
 
 A JMH benchmarking suite for vector similarity search using Inverted File (IVF) indexes in Java. Compares three distance computation engines and three clustering algorithms across multiple distance metrics.
 

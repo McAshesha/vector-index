@@ -164,16 +164,7 @@ public class IVFIndexFlat implements IVFIndex {
         for (int c = 0; c < clusterCnt; c++)
             centroidDistances[c] = fn.compute(qry, centroids[c]);
 
-        for (int i = 0; i < nProbe; i++) {
-            int minIdx = i;
-            for (int j = i + 1; j < clusterCnt; j++) {
-                if (centroidDistances[clusterOrder[j]] < centroidDistances[clusterOrder[minIdx]])
-                    minIdx = j;
-            }
-            int tmp = clusterOrder[i];
-            clusterOrder[i] = clusterOrder[minIdx];
-            clusterOrder[minIdx] = tmp;
-        }
+        selectNearestClusters(centroidDistances, clusterOrder, clusterCnt, nProbe);
 
         int[] heapIds;
         float[] heapDistances;
@@ -229,10 +220,60 @@ public class IVFIndexFlat implements IVFIndex {
             }
         }
 
-        for (int c = 0; c < clusterCnt; c++)
-            clusterOrder[c] = c;
-
         return Arrays.asList(sorted);
+    }
+
+    /**
+     * Selects nProbe nearest clusters using a max-heap.
+     * Time complexity: O(k + nProbe * log(nProbe)) instead of O(nProbe * k) for selection sort.
+     * Result: clusterOrder[0..nProbe-1] contains indices of nProbe nearest clusters, sorted by distance.
+     */
+    private static void selectNearestClusters(float[] distances, int[] clusterOrder, int clusterCnt, int nProbe) {
+        // Initialize clusterOrder with first nProbe clusters
+        for (int i = 0; i < nProbe; i++)
+            clusterOrder[i] = i;
+
+        // Build max-heap from first nProbe clusters
+        for (int i = nProbe / 2 - 1; i >= 0; i--)
+            siftDownCluster(distances, clusterOrder, i, nProbe);
+
+        // Process remaining clusters: if closer than max in heap, replace and sift
+        for (int c = nProbe; c < clusterCnt; c++) {
+            if (distances[c] < distances[clusterOrder[0]]) {
+                clusterOrder[0] = c;
+                siftDownCluster(distances, clusterOrder, 0, nProbe);
+            }
+        }
+
+        // Extract from heap to get sorted order (ascending by distance)
+        // After this, clusterOrder[0] = nearest, clusterOrder[nProbe-1] = farthest among selected
+        for (int i = nProbe - 1; i > 0; i--) {
+            int tmp = clusterOrder[0];
+            clusterOrder[0] = clusterOrder[i];
+            clusterOrder[i] = tmp;
+            siftDownCluster(distances, clusterOrder, 0, i);
+        }
+    }
+
+    private static void siftDownCluster(float[] distances, int[] clusterOrder, int i, int size) {
+        while (true) {
+            int largest = i;
+            int left = 2 * i + 1;
+            int right = 2 * i + 2;
+
+            if (left < size && distances[clusterOrder[left]] > distances[clusterOrder[largest]])
+                largest = left;
+            if (right < size && distances[clusterOrder[right]] > distances[clusterOrder[largest]])
+                largest = right;
+
+            if (largest == i)
+                break;
+
+            int tmp = clusterOrder[i];
+            clusterOrder[i] = clusterOrder[largest];
+            clusterOrder[largest] = tmp;
+            i = largest;
+        }
     }
 
     private static void buildMaxHeap(float[] dist, int[] ids, int[] clusterIds, int size) {
