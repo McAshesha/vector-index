@@ -28,8 +28,8 @@ set_property(GLOBAL PROPERTY _CMAKE_FindGit_GIT_EXECUTABLE_VERSION
 include(ExternalProject)
 ExternalProject_Add(simsimd-populate
                      "UPDATE_DISCONNECTED" "False" "GIT_REPOSITORY" "https://github.com/ashvardanian/SimSIMD.git" "EXTERNALPROJECT_INTERNAL_ARGUMENT_SEPARATOR" "GIT_TAG" "main" "GIT_SHALLOW" "TRUE"
-                    SOURCE_DIR          "/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src"
-                    BINARY_DIR          "/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build"
+                    SOURCE_DIR          "/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src"
+                    BINARY_DIR          "/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-build"
                     CONFIGURE_COMMAND   ""
                     BUILD_COMMAND       ""
                     INSTALL_COMMAND     ""

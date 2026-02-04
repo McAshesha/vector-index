@@ -3,11 +3,11 @@
 
 cmake_minimum_required(VERSION ${CMAKE_VERSION}) # this file comes with cmake
 
-if(EXISTS "/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitclone-lastrun.txt" AND EXISTS "/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitinfo.txt" AND
-  "/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitclone-lastrun.txt" IS_NEWER_THAN "/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitinfo.txt")
+if(EXISTS "/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitclone-lastrun.txt" AND EXISTS "/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitinfo.txt" AND
+  "/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitclone-lastrun.txt" IS_NEWER_THAN "/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitinfo.txt")
   message(VERBOSE
     "Avoiding repeated git clone, stamp file is up to date: "
-    "'/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitclone-lastrun.txt'"
+    "'/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitclone-lastrun.txt'"
   )
   return()
 endif()
@@ -22,12 +22,12 @@ else()
 endif()
 
 execute_process(
-  COMMAND ${CMAKE_COMMAND} -E rm -rf "/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src"
+  COMMAND ${CMAKE_COMMAND} -E rm -rf "/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src"
   RESULT_VARIABLE error_code
   ${maybe_show_command}
 )
 if(error_code)
-  message(FATAL_ERROR "Failed to remove directory: '/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src'")
+  message(FATAL_ERROR "Failed to remove directory: '/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src'")
 endif()
 
 # try the clone 3 times in case there is an odd git clone issue
@@ -37,7 +37,7 @@ while(error_code AND number_of_tries LESS 3)
   execute_process(
     COMMAND "/usr/sbin/git"
             clone --no-checkout --depth 1 --no-single-branch --config "advice.detachedHead=false" "https://github.com/ashvardanian/SimSIMD.git" "simsimd-src"
-    WORKING_DIRECTORY "/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps"
+    WORKING_DIRECTORY "/home/ashesha/Sources/vector-index/src/main/native/build/_deps"
     RESULT_VARIABLE error_code
     ${maybe_show_command}
   )
@@ -53,7 +53,7 @@ endif()
 execute_process(
   COMMAND "/usr/sbin/git"
           checkout "main" --
-  WORKING_DIRECTORY "/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src"
+  WORKING_DIRECTORY "/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src"
   RESULT_VARIABLE error_code
   ${maybe_show_command}
 )
@@ -66,22 +66,22 @@ if(init_submodules)
   execute_process(
     COMMAND "/usr/sbin/git" 
             submodule update --recursive --init 
-    WORKING_DIRECTORY "/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src"
+    WORKING_DIRECTORY "/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src"
     RESULT_VARIABLE error_code
     ${maybe_show_command}
   )
 endif()
 if(error_code)
-  message(FATAL_ERROR "Failed to update submodules in: '/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src'")
+  message(FATAL_ERROR "Failed to update submodules in: '/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src'")
 endif()
 
 # Complete success, update the script-last-run stamp file:
 #
 execute_process(
-  COMMAND ${CMAKE_COMMAND} -E copy "/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitinfo.txt" "/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitclone-lastrun.txt"
+  COMMAND ${CMAKE_COMMAND} -E copy "/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitinfo.txt" "/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitclone-lastrun.txt"
   RESULT_VARIABLE error_code
   ${maybe_show_command}
 )
 if(error_code)
-  message(FATAL_ERROR "Failed to copy script-last-run stamp file: '/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitclone-lastrun.txt'")
+  message(FATAL_ERROR "Failed to copy script-last-run stamp file: '/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitclone-lastrun.txt'")
 endif()

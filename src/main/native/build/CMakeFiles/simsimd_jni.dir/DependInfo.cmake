@@ -8,7 +8,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/home/ashesha/Sources/vector-index-bench/src/main/native/simsimd_jni.c" "CMakeFiles/simsimd_jni.dir/simsimd_jni.c.o" "gcc" "CMakeFiles/simsimd_jni.dir/simsimd_jni.c.o.d"
+  "/home/ashesha/Sources/vector-index/src/main/native/simsimd_jni.c" "CMakeFiles/simsimd_jni.dir/simsimd_jni.c.o" "gcc" "CMakeFiles/simsimd_jni.dir/simsimd_jni.c.o.d"
   "" "libsimsimd_jni.so" "gcc" "CMakeFiles/simsimd_jni.dir/link.d"
   )
 

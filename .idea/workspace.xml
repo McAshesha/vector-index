@@ -1,4 +1,144 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PropertiesComponent">{}</component>
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="dfb42b19-6457-4a8c-a18e-e9567e537ac6" name="Changes" comment="add old sources">
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pom.xml" beforeDir="false" afterPath="$PROJECT_DIR$/pom.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/CMakeCache.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/CMakeCache.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/CMakeConfigureLog.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/CMakeConfigureLog.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/CMakeDirectoryInformation.cmake" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/CMakeDirectoryInformation.cmake" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/InstallScripts.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/InstallScripts.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/Makefile.cmake" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/Makefile.cmake" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/Makefile2" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/Makefile2" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/TargetDirectories.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/TargetDirectories.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/simsimd_jni.dir/DependInfo.cmake" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/simsimd_jni.dir/DependInfo.cmake" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/simsimd_jni.dir/build.make" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/simsimd_jni.dir/build.make" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/simsimd_jni.dir/compiler_depend.internal" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/simsimd_jni.dir/compiler_depend.internal" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/simsimd_jni.dir/compiler_depend.make" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/simsimd_jni.dir/compiler_depend.make" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/simsimd_jni.dir/flags.make" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/simsimd_jni.dir/flags.make" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/simsimd_jni.dir/simsimd_jni.c.o.d" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/CMakeFiles/simsimd_jni.dir/simsimd_jni.c.o.d" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/Makefile" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/Makefile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-build/CMakeFiles/CMakeDirectoryInformation.cmake" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-build/CMakeFiles/CMakeDirectoryInformation.cmake" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-build/Makefile" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-build/Makefile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-build/cmake_install.cmake" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-build/cmake_install.cmake" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeCache.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeCache.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/CMakeDirectoryInformation.cmake" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/CMakeDirectoryInformation.cmake" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/InstallScripts.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/InstallScripts.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/Makefile2" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/Makefile2" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/TargetDirectories.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/TargetDirectories.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/simsimd-populate.dir/Labels.json" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/simsimd-populate.dir/Labels.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/simsimd-populate.dir/Labels.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/simsimd-populate.dir/Labels.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/simsimd-populate.dir/build.make" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/simsimd-populate.dir/build.make" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeLists.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/CMakeLists.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/Makefile" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/Makefile" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/cmake_install.cmake" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/cmake_install.cmake" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitclone-lastrun.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitclone-lastrun.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitinfo.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitinfo.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-update-info.txt" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-update-info.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/tmp/simsimd-populate-gitclone.cmake" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/tmp/simsimd-populate-gitclone.cmake" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/tmp/simsimd-populate-gitupdate.cmake" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/tmp/simsimd-populate-gitupdate.cmake" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/tmp/simsimd-populate-mkdirs.cmake" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/tmp/simsimd-populate-mkdirs.cmake" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/main/native/build/cmake_install.cmake" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/native/build/cmake_install.cmake" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="CopilotPersistence">
+    <persistenceIdMap>
+      <entry key="_/home/ashesha/Sources/test/vector-index" value="39CgcgPXXOk2rUa7hFTLgO4eJUR" />
+    </persistenceIdMap>
+  </component>
+  <component name="EmbeddingIndexingInfo">
+    <option name="cachedIndexableFilesCount" value="210" />
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;McAshesha&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;git@github.com:McAshesha/vector-index.git&quot;,
+    &quot;accountId&quot;: &quot;8cdef7ea-95b2-4ab8-9cc1-19a9e9bb28ba&quot;
+  }
+}</component>
+  <component name="McpProjectServerCommands">
+    <commands />
+    <urls />
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;customColor&quot;: &quot;&quot;,
+  &quot;associatedIndex&quot;: 2
+}</component>
+  <component name="ProjectId" id="39CgcgPXXOk2rUa7hFTLgO4eJUR" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Maven.vector-index [test].executor": "Run",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "RunOnceActivity.MCP Project settings loaded": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "com.intellij.ml.llm.matterhorn.ej.ui.settings.DefaultModelSelectionForGA.v1": "true",
+    "git-widget-placeholder": "master",
+    "junie.onboarding.icon.badge.shown": "true",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "/home/ashesha/Sources/vector-index/pom.xml",
+    "project.structure.last.edited": "Project",
+    "project.structure.proportion": "0.0",
+    "project.structure.side.proportion": "0.0",
+    "to.speed.mode.migration.done": "true"
+  }
+}]]></component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-jdk-30f59d01ecdd-26cb7f24e5b0-intellij.indexing.shared.core-IU-253.29346.138" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="dfb42b19-6457-4a8c-a18e-e9567e537ac6" name="Changes" comment="" />
+      <created>1770205549415</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1770205549415</updated>
+    </task>
+    <task id="LOCAL-00001" summary="add old sources">
+      <option name="closed" value="true" />
+      <created>1770205664092</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1770205664092</updated>
+    </task>
+    <option name="localTasksCounter" value="2" />
+    <servers />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="add old sources" />
+    <option name="LAST_COMMIT_MESSAGE" value="add old sources" />
+  </component>
+  <component name="github-copilot-workspace">
+    <instructionFileLocations>
+      <option value=".github/instructions" />
+    </instructionFileLocations>
+    <promptFileLocations>
+      <option value=".github/prompts" />
+    </promptFileLocations>
+  </component>
 </project>

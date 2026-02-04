@@ -1,4 +1,4 @@
-# Install script for directory: /home/ashesha/Sources/vector-index-bench/src/main/native
+# Install script for directory: /home/ashesha/Sources/vector-index/src/main/native
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -44,13 +44,13 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
-  include("/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build/cmake_install.cmake")
+  include("/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-build/cmake_install.cmake")
 endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
 if(CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "/home/ashesha/Sources/vector-index-bench/src/main/native/build/install_local_manifest.txt"
+  file(WRITE "/home/ashesha/Sources/vector-index/src/main/native/build/install_local_manifest.txt"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()
 if(CMAKE_INSTALL_COMPONENT)
@@ -66,6 +66,6 @@ else()
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
-  file(WRITE "/home/ashesha/Sources/vector-index-bench/src/main/native/build/${CMAKE_INSTALL_MANIFEST}"
+  file(WRITE "/home/ashesha/Sources/vector-index/src/main/native/build/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")
 endif()

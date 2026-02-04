@@ -6,11 +6,11 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>ru.mcashesha</groupId>
-    <artifactId>vector-index-bench</artifactId>
+    <artifactId>vector-index</artifactId>
     <version>1.0</version>
     <packaging>jar</packaging>
 
-    <name>vector-index-bench</name>
+    <name>vector-index</name>
     <description>JMH benchmarks for vector index with JNI + SimSIMD</description>
 
     <properties>

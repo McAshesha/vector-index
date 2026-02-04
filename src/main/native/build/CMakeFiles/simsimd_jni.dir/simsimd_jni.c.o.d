@@ -1,7 +1,7 @@
 CMakeFiles/simsimd_jni.dir/simsimd_jni.c.o: \
- /home/ashesha/Sources/vector-index-bench/src/main/native/simsimd_jni.c \
+ /home/ashesha/Sources/vector-index/src/main/native/simsimd_jni.c \
  /usr/include/stdc-predef.h \
- /home/ashesha/Sources/vector-index-bench/src/main/native/ru_mcashesha_metrics_SimSIMD.h \
+ /home/ashesha/Sources/vector-index/src/main/native/ru_mcashesha_metrics_SimSIMD.h \
  /usr/lib/jvm/default/include/jni.h /usr/include/stdio.h \
  /usr/include/bits/libc-header-start.h /usr/include/features.h \
  /usr/include/features-time64.h /usr/include/bits/wordsize.h \
@@ -19,9 +19,9 @@ CMakeFiles/simsimd_jni.dir/simsimd_jni.c.o: \
  /usr/include/bits/stdio_lim.h /usr/include/bits/floatn.h \
  /usr/include/bits/floatn-common.h /usr/include/bits/stdio.h \
  /usr/lib/jvm/default/include/linux/jni_md.h \
- /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src/include/simsimd/simsimd.h \
- /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src/include/simsimd/binary.h \
- /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src/include/simsimd/types.h \
+ /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src/include/simsimd/simsimd.h \
+ /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src/include/simsimd/binary.h \
+ /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src/include/simsimd/types.h \
  /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include/immintrin.h \
  /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include/x86gprintrin.h \
  /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include/ia32intrin.h \
@@ -157,10 +157,10 @@ CMakeFiles/simsimd_jni.dir/simsimd_jni.c.o: \
  /usr/include/bits/fp-fast.h /usr/include/bits/mathcalls-macros.h \
  /usr/include/bits/mathcalls-helper-functions.h \
  /usr/include/bits/mathcalls.h \
- /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src/include/simsimd/curved.h \
- /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src/include/simsimd/dot.h \
- /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src/include/simsimd/spatial.h \
- /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src/include/simsimd/elementwise.h \
- /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src/include/simsimd/geospatial.h \
- /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src/include/simsimd/probability.h \
- /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src/include/simsimd/sparse.h
+ /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src/include/simsimd/curved.h \
+ /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src/include/simsimd/dot.h \
+ /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src/include/simsimd/spatial.h \
+ /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src/include/simsimd/elementwise.h \
+ /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src/include/simsimd/geospatial.h \
+ /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src/include/simsimd/probability.h \
+ /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src/include/simsimd/sparse.h

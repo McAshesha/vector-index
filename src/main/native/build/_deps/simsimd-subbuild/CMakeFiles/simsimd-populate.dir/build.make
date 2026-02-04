@@ -53,10 +53,10 @@ RM = /usr/sbin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild
+CMAKE_SOURCE_DIR = /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild
+CMAKE_BINARY_DIR = /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild
 
 # Utility rule file for simsimd-populate.
 
@@ -77,60 +77,60 @@ CMakeFiles/simsimd-populate-complete: simsimd-populate-prefix/src/simsimd-popula
 CMakeFiles/simsimd-populate-complete: simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-build
 CMakeFiles/simsimd-populate-complete: simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-install
 CMakeFiles/simsimd-populate-complete: simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-test
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Completed 'simsimd-populate'"
-	/usr/sbin/cmake -E make_directory /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles
-	/usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/simsimd-populate-complete
-	/usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-done
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Completed 'simsimd-populate'"
+	/usr/sbin/cmake -E make_directory /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles
+	/usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/simsimd-populate-complete
+	/usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-done
 
 simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-update:
 .PHONY : simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-update
 
 simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-build: simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-configure
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "No build step for 'simsimd-populate'"
-	cd /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E echo_append
-	cd /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "No build step for 'simsimd-populate'"
+	cd /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E echo_append
+	cd /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-build
 
 simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-configure: simsimd-populate-prefix/tmp/simsimd-populate-cfgcmd.txt
 simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-configure: simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-patch
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "No configure step for 'simsimd-populate'"
-	cd /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E echo_append
-	cd /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-configure
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "No configure step for 'simsimd-populate'"
+	cd /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E echo_append
+	cd /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-configure
 
 simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-download: simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-gitinfo.txt
 simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-download: simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-mkdir
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Performing download step (git clone) for 'simsimd-populate'"
-	cd /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps && /usr/sbin/cmake -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE -P /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/tmp/simsimd-populate-gitclone.cmake
-	cd /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps && /usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-download
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Performing download step (git clone) for 'simsimd-populate'"
+	cd /home/ashesha/Sources/vector-index/src/main/native/build/_deps && /usr/sbin/cmake -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE -P /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/tmp/simsimd-populate-gitclone.cmake
+	cd /home/ashesha/Sources/vector-index/src/main/native/build/_deps && /usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-download
 
 simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-install: simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-build
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "No install step for 'simsimd-populate'"
-	cd /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E echo_append
-	cd /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-install
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "No install step for 'simsimd-populate'"
+	cd /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E echo_append
+	cd /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-install
 
 simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-mkdir:
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Creating directories for 'simsimd-populate'"
-	/usr/sbin/cmake -Dcfgdir= -P /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/tmp/simsimd-populate-mkdirs.cmake
-	/usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-mkdir
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Creating directories for 'simsimd-populate'"
+	/usr/sbin/cmake -Dcfgdir= -P /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/tmp/simsimd-populate-mkdirs.cmake
+	/usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-mkdir
 
 simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-patch: simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-patch-info.txt
 simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-patch: simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-update
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "No patch step for 'simsimd-populate'"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_7) "No patch step for 'simsimd-populate'"
 	/usr/sbin/cmake -E echo_append
-	/usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-patch
+	/usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-patch
 
 simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-update:
 .PHONY : simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-update
 
 simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-test: simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-install
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "No test step for 'simsimd-populate'"
-	cd /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E echo_append
-	cd /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-test
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_8) "No test step for 'simsimd-populate'"
+	cd /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E echo_append
+	cd /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-build && /usr/sbin/cmake -E touch /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-test
 
 simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-update: simsimd-populate-prefix/tmp/simsimd-populate-gitupdate.cmake
 simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-update: simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-update-info.txt
 simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-update: simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-download
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Performing update step for 'simsimd-populate'"
-	cd /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src && /usr/sbin/cmake -Dcan_fetch=YES -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE -P /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/tmp/simsimd-populate-gitupdate.cmake
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --blue --bold --progress-dir=/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles --progress-num=$(CMAKE_PROGRESS_9) "Performing update step for 'simsimd-populate'"
+	cd /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src && /usr/sbin/cmake -Dcan_fetch=YES -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE -P /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/tmp/simsimd-populate-gitupdate.cmake
 
 CMakeFiles/simsimd-populate.dir/codegen:
 .PHONY : CMakeFiles/simsimd-populate.dir/codegen
@@ -157,6 +157,6 @@ CMakeFiles/simsimd-populate.dir/clean:
 .PHONY : CMakeFiles/simsimd-populate.dir/clean
 
 CMakeFiles/simsimd-populate.dir/depend:
-	cd /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild /home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/simsimd-populate.dir/DependInfo.cmake "--color=$(COLOR)" simsimd-populate
+	cd /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild /home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/simsimd-populate.dir/DependInfo.cmake "--color=$(COLOR)" simsimd-populate
 .PHONY : CMakeFiles/simsimd-populate.dir/depend
 

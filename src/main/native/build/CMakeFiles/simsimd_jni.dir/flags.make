@@ -4,7 +4,7 @@
 # compile C with /usr/sbin/cc
 C_DEFINES = -Dsimsimd_jni_EXPORTS
 
-C_INCLUDES = -I/usr/lib/jvm/default/include -I/usr/lib/jvm/default/include/linux -I/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-src/include
+C_INCLUDES = -I/usr/lib/jvm/default/include -I/usr/lib/jvm/default/include/linux -I/home/ashesha/Sources/vector-index/src/main/native/build/_deps/simsimd-src/include
 
 C_FLAGS = -O3 -DNDEBUG -std=gnu99 -fPIC -O3 -march=native -ffast-math
 
