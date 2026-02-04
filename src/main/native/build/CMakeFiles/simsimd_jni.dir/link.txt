@@ -1,0 +1,1 @@
+/usr/sbin/cc -fPIC -O3 -DNDEBUG -shared -Wl,--dependency-file=CMakeFiles/simsimd_jni.dir/link.d -Wl,-soname,libsimsimd_jni.so -o libsimsimd_jni.so CMakeFiles/simsimd_jni.dir/simsimd_jni.c.o

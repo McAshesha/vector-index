@@ -1,0 +1,13 @@
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/CMakeFiles/simsimd_jni.dir
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/CMakeFiles/edit_cache.dir
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/CMakeFiles/rebuild_cache.dir
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/CMakeFiles/list_install_components.dir
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/CMakeFiles/install.dir
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/CMakeFiles/install/local.dir
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/CMakeFiles/install/strip.dir
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build/CMakeFiles/edit_cache.dir
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build/CMakeFiles/rebuild_cache.dir
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build/CMakeFiles/list_install_components.dir
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build/CMakeFiles/install.dir
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build/CMakeFiles/install/local.dir
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build/CMakeFiles/install/strip.dir

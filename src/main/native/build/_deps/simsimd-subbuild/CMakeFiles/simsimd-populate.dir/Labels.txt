@@ -1,0 +1,14 @@
+# Target labels
+ simsimd-populate
+# Source files and their labels
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/simsimd-populate
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/simsimd-populate.rule
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/CMakeFiles/simsimd-populate-complete.rule
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-build.rule
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-configure.rule
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-download.rule
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-install.rule
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-mkdir.rule
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-patch.rule
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-test.rule
+/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-subbuild/simsimd-populate-prefix/src/simsimd-populate-stamp/simsimd-populate-update.rule

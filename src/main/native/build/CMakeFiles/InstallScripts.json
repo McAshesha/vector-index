@@ -1,0 +1,8 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/ashesha/Sources/vector-index-bench/src/main/native/build/cmake_install.cmake",
+		"/home/ashesha/Sources/vector-index-bench/src/main/native/build/_deps/simsimd-build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
