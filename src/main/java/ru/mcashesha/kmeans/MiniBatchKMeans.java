@@ -2,6 +2,7 @@ package ru.mcashesha.kmeans;
 
 import java.util.Arrays;
 import java.util.Random;
+import java.util.stream.IntStream;
 import ru.mcashesha.metrics.Metric;
 
 class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
@@ -86,9 +87,14 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
         float[][] batchSums = new float[clusterCnt][dimension];
         int[] batchClusterCounts = new int[clusterCnt];
 
+        // Parallel sample pool initialization for large datasets
         int[] samplePool = new int[sampleCnt];
-        for (int i = 0; i < sampleCnt; i++)
-            samplePool[i] = i;
+        if (sampleCnt >= 10000) {
+            IntStream.range(0, sampleCnt).parallel().forEach(i -> samplePool[i] = i);
+        } else {
+            for (int i = 0; i < sampleCnt; i++)
+                samplePool[i] = i;
+        }
 
         for (int iteration = 0; iteration < maxIterations; iteration++) {
             for (int i = 0; i < actualBatchSize; i++) {
@@ -99,10 +105,20 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
                 batchIndices[i] = samplePool[i];
             }
 
-            for (int c = 0; c < clusterCnt; c++) {
-                if (batchClusterCounts[c] > 0) {
-                    Arrays.fill(batchSums[c], 0.0f);
-                    batchClusterCounts[c] = 0;
+            // Clear batch accumulators - parallel for large cluster counts
+            if (clusterCnt >= PARALLEL_UPDATE_THRESHOLD) {
+                IntStream.range(0, clusterCnt).parallel().forEach(c -> {
+                    if (batchClusterCounts[c] > 0) {
+                        Arrays.fill(batchSums[c], 0.0f);
+                        batchClusterCounts[c] = 0;
+                    }
+                });
+            } else {
+                for (int c = 0; c < clusterCnt; c++) {
+                    if (batchClusterCounts[c] > 0) {
+                        Arrays.fill(batchSums[c], 0.0f);
+                        batchClusterCounts[c] = 0;
+                    }
                 }
             }
 
@@ -185,6 +201,8 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
         return labels;
     }
 
+    private static final int PARALLEL_BATCH_THRESHOLD = 256;
+
     private float assignMiniBatch(float[][] data,
         float[][] centroids,
         int[] batchIndices,
@@ -192,6 +210,14 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
         int[] batchClusterCounts,
         int dimension,
         Metric.DistanceFunction distFn) {
+
+        int batchLen = batchIndices.length;
+
+        if (batchLen >= PARALLEL_BATCH_THRESHOLD) {
+            return assignMiniBatchParallel(data, centroids, batchIndices, batchSums, batchClusterCounts, dimension, distFn);
+        }
+
+        // Sequential path for small batches
         float batchLoss = 0.0f;
 
         for (int sampleIdx : batchIndices) {
@@ -220,28 +246,122 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
         return batchLoss;
     }
 
+    private float assignMiniBatchParallel(float[][] data,
+        float[][] centroids,
+        int[] batchIndices,
+        float[][] batchSums,
+        int[] batchClusterCounts,
+        int dimension,
+        Metric.DistanceFunction distFn) {
+
+        int batchLen = batchIndices.length;
+        int numThreads = Math.min(Runtime.getRuntime().availableProcessors(), batchLen);
+        int chunkSize = (batchLen + numThreads - 1) / numThreads;
+
+        // Thread-local accumulators
+        float[][][] localSums = new float[numThreads][clusterCnt][dimension];
+        int[][] localCounts = new int[numThreads][clusterCnt];
+        float[] localLoss = new float[numThreads];
+
+        // Parallel assignment with thread-local accumulation
+        IntStream.range(0, numThreads).parallel().forEach(threadIdx -> {
+            int start = threadIdx * chunkSize;
+            int end = Math.min(start + chunkSize, batchLen);
+
+            float[][] mySums = localSums[threadIdx];
+            int[] myCounts = localCounts[threadIdx];
+            float myLoss = 0f;
+
+            for (int b = start; b < end; b++) {
+                int sampleIdx = batchIndices[b];
+                float[] point = data[sampleIdx];
+
+                int nearestClusterIdx = 0;
+                float nearestDistance = distFn.compute(point, centroids[0]);
+
+                for (int c = 1; c < clusterCnt; c++) {
+                    float distance = distFn.compute(point, centroids[c]);
+                    if (distance < nearestDistance) {
+                        nearestDistance = distance;
+                        nearestClusterIdx = c;
+                    }
+                }
+
+                myLoss += nearestDistance;
+                myCounts[nearestClusterIdx]++;
+
+                float[] sum = mySums[nearestClusterIdx];
+                for (int d = 0; d < dimension; d++)
+                    sum[d] += point[d];
+            }
+
+            localLoss[threadIdx] = myLoss;
+        });
+
+        // Merge results
+        float totalLoss = 0f;
+        for (int t = 0; t < numThreads; t++) {
+            totalLoss += localLoss[t];
+
+            for (int c = 0; c < clusterCnt; c++) {
+                batchClusterCounts[c] += localCounts[t][c];
+
+                float[] threadSum = localSums[t][c];
+                float[] targetSum = batchSums[c];
+                for (int d = 0; d < dimension; d++)
+                    targetSum[d] += threadSum[d];
+            }
+        }
+
+        return totalLoss;
+    }
+
+    private static final int PARALLEL_UPDATE_THRESHOLD = 64;
+
     private void updateCentroidsFromMiniBatch(float[][] centroids,
         long[] clusterCounts,
         float[][] batchSums,
         int[] batchClusterCounts,
         int dimension) {
 
-        for (int c = 0; c < clusterCnt; c++) {
-            int batchCnt = batchClusterCounts[c];
-            if (batchCnt == 0)
-                continue;
+        if (clusterCnt >= PARALLEL_UPDATE_THRESHOLD) {
+            // Parallel centroid update
+            IntStream.range(0, clusterCnt).parallel().forEach(c -> {
+                int batchCnt = batchClusterCounts[c];
+                if (batchCnt == 0)
+                    return;
 
-            long oldCnt = clusterCounts[c];
-            long newCnt = oldCnt + batchCnt;
+                long oldCnt = clusterCounts[c];
+                long newCnt = oldCnt + batchCnt;
 
-            clusterCounts[c] = newCnt;
+                clusterCounts[c] = newCnt;
 
-            double invNewCnt = 1.0 / newCnt;
-            float[] centroid = centroids[c];
-            float[] sum = batchSums[c];
+                double invNewCnt = 1.0 / newCnt;
+                float[] centroid = centroids[c];
+                float[] sum = batchSums[c];
 
-            for (int d = 0; d < dimension; d++)
-                centroid[d] = (float) (((double) centroid[d] * oldCnt + sum[d]) * invNewCnt);
+                for (int d = 0; d < dimension; d++)
+                    centroid[d] = (float) (((double) centroid[d] * oldCnt + sum[d]) * invNewCnt);
+            });
+        } else {
+            // Sequential path
+            for (int c = 0; c < clusterCnt; c++) {
+                int batchCnt = batchClusterCounts[c];
+                if (batchCnt == 0)
+                    continue;
+
+                long oldCnt = clusterCounts[c];
+                long newCnt = oldCnt + batchCnt;
+
+                clusterCounts[c] = newCnt;
+
+                double invNewCnt = 1.0 / newCnt;
+                float[] centroid = centroids[c];
+                float[] sum = batchSums[c];
+
+                for (int d = 0; d < dimension; d++)
+                    centroid[d] = (float) (((double) centroid[d] * oldCnt + sum[d]) * invNewCnt);
+            }
         }
 
         if (metricType == Metric.Type.COSINE_DISTANCE)

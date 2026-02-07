@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicIntegerArray;
+import java.util.stream.IntStream;
 import ru.mcashesha.metrics.Metric;
 
 class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
@@ -68,9 +70,14 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
 
         Metric.DistanceFunction distFn = metricType.resolveFunction(metricEngine);
 
+        // Parallel indices initialization for large datasets
         int[] allIndices = new int[sampleCnt];
-        for (int i = 0; i < sampleCnt; i++)
-            allIndices[i] = i;
+        if (sampleCnt >= PARALLEL_CENTROID_THRESHOLD) {
+            IntStream.range(0, sampleCnt).parallel().forEach(i -> allIndices[i] = i);
+        } else {
+            for (int i = 0; i < sampleCnt; i++)
+                allIndices[i] = i;
+        }
 
         Node root = buildNode(data, allIndices, 0, dimension);
 
@@ -85,6 +92,8 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
 
         return new Result(root, leafAssignments, leafCentroids, lossAccumulator.val, clusterSizes);
     }
+
+    private static final int PARALLEL_PREDICT_THRESHOLD = 1000;
 
     @Override public int[] predict(float[][] data, Result model) {
         if (data == null || data.length == 0)
@@ -101,36 +110,44 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
         Metric.DistanceFunction distFn = metricType.resolveFunction(metricEngine);
         int[] labels = new int[data.length];
 
-        for (int i = 0; i < data.length; i++) {
-            float[] point = data[i];
-            Node node = model.getRoot();
-
-            while (!node.isLeaf()) {
-                Node[] children = node.getChildren();
-                if (children == null || children.length == 0)
-                    break;
-
-                Node bestChild = children[0];
-                float bestDistance = distFn.compute(point, children[0].centroid);
-
-                for (int c = 1; c < children.length; c++) {
-                    float distance = distFn.compute(point, children[c].centroid);
-                    if (distance < bestDistance) {
-                        bestDistance = distance;
-                        bestChild = children[c];
-                    }
-                }
-
-                node = bestChild;
-            }
-
-            if (node.getLeafId() < 0)
-                throw new IllegalStateException("Leaf node has no leafId assigned");
-
-            labels[i] = node.getLeafId();
+        if (data.length >= PARALLEL_PREDICT_THRESHOLD) {
+            // Parallel prediction - each point traversal is independent
+            Node root = model.getRoot();
+            IntStream.range(0, data.length).parallel().forEach(i ->
+                labels[i] = predictSinglePoint(data[i], root, distFn));
+        } else {
+            // Sequential path for small datasets
+            for (int i = 0; i < data.length; i++)
+                labels[i] = predictSinglePoint(data[i], model.getRoot(), distFn);
         }
 
         return labels;
+    }
+
+    private int predictSinglePoint(float[] point, Node node, Metric.DistanceFunction distFn) {
+        while (!node.isLeaf()) {
+            Node[] children = node.getChildren();
+            if (children == null || children.length == 0)
+                break;
+
+            Node bestChild = children[0];
+            float bestDistance = distFn.compute(point, children[0].centroid);
+
+            for (int c = 1; c < children.length; c++) {
+                float distance = distFn.compute(point, children[c].centroid);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestChild = children[c];
+                }
+            }
+
+            node = bestChild;
+        }
+
+        if (node.getLeafId() < 0)
+            throw new IllegalStateException("Leaf node has no leafId assigned");
+
+        return node.getLeafId();
     }
 
     private Node buildNode(float[][] data,
@@ -148,9 +165,15 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
         if (locClusterCnt < 2)
             return new Node(level, centroid, null, indices);
 
+        // Parallel subset creation for large nodes
         float[][] subset = new float[sampleCnt][];
-        for (int i = 0; i < sampleCnt; i++)
-            subset[i] = data[indices[i]];
+        if (sampleCnt >= PARALLEL_CENTROID_THRESHOLD) {
+            IntStream.range(0, sampleCnt).parallel().forEach(i ->
+                subset[i] = data[indices[i]]);
+        } else {
+            for (int i = 0; i < sampleCnt; i++)
+                subset[i] = data[indices[i]];
+        }
 
         LloydKMeans kmeans = new LloydKMeans(
             locClusterCnt,
@@ -192,7 +215,6 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
         }
 
         int[][] childIndices = new int[nonEmptyClusterCnt][];
-        int[] offsets = new int[nonEmptyClusterCnt];
 
         int[] childSizes = new int[nonEmptyClusterCnt];
         for (int c = 0; c < locClusterCnt; c++) {
@@ -204,19 +226,42 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
         for (int i = 0; i < nonEmptyClusterCnt; i++)
             childIndices[i] = new int[childSizes[i]];
 
-        for (int i = 0; i < sampleCnt; i++) {
-            int originalCluster = labels[i];
-            int mappedChild = clusterIdToChildIdx[originalCluster];
-            int pos = offsets[mappedChild]++;
-            childIndices[mappedChild][pos] = indices[i];
+        // Parallel child indices distribution for large nodes
+        if (sampleCnt >= PARALLEL_CENTROID_THRESHOLD) {
+            AtomicIntegerArray atomicOffsets = new AtomicIntegerArray(nonEmptyClusterCnt);
+            IntStream.range(0, sampleCnt).parallel().forEach(i -> {
+                int originalCluster = labels[i];
+                int mappedChild = clusterIdToChildIdx[originalCluster];
+                int pos = atomicOffsets.getAndIncrement(mappedChild);
+                childIndices[mappedChild][pos] = indices[i];
+            });
+        } else {
+            int[] offsets = new int[nonEmptyClusterCnt];
+            for (int i = 0; i < sampleCnt; i++) {
+                int originalCluster = labels[i];
+                int mappedChild = clusterIdToChildIdx[originalCluster];
+                int pos = offsets[mappedChild]++;
+                childIndices[mappedChild][pos] = indices[i];
+            }
         }
 
+        // Parallel tree building: children at same level are independent
         Node[] children = new Node[nonEmptyClusterCnt];
-        for (int i = 0; i < nonEmptyClusterCnt; i++)
-            children[i] = buildNode(data, childIndices[i], level + 1, dimension);
+        if (nonEmptyClusterCnt >= 2 && level < maxDepth - 2) {
+            // Use parallel streams for building children
+            int[][] finalChildIndices = childIndices;
+            IntStream.range(0, nonEmptyClusterCnt).parallel().forEach(i ->
+                children[i] = buildNode(data, finalChildIndices[i], level + 1, dimension));
+        } else {
+            // Sequential for small number of children or near leaf level
+            for (int i = 0; i < nonEmptyClusterCnt; i++)
+                children[i] = buildNode(data, childIndices[i], level + 1, dimension);
+        }
 
         return new Node(level, centroid, children, null);
     }
+
+    private static final int PARALLEL_CENTROID_THRESHOLD = 5000;
 
     private float[] computeCentroid(float[][] data,
         int[] indices,
@@ -226,10 +271,36 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
         if (cnt == 0)
             return centroid;
 
-        for (int idx : indices) {
-            float[] point = data[idx];
-            for (int d = 0; d < dimension; d++)
-                centroid[d] += point[d];
+        if (cnt >= PARALLEL_CENTROID_THRESHOLD) {
+            // Parallel centroid computation with thread-local sums
+            int numThreads = Runtime.getRuntime().availableProcessors();
+            int chunkSize = (cnt + numThreads - 1) / numThreads;
+            float[][] localSums = new float[numThreads][dimension];
+
+            IntStream.range(0, numThreads).parallel().forEach(threadIdx -> {
+                int start = threadIdx * chunkSize;
+                int end = Math.min(start + chunkSize, cnt);
+                float[] mySum = localSums[threadIdx];
+
+                for (int i = start; i < end; i++) {
+                    float[] point = data[indices[i]];
+                    for (int d = 0; d < dimension; d++)
+                        mySum[d] += point[d];
+                }
+            });
+
+            // Merge
+            for (int t = 0; t < numThreads; t++) {
+                for (int d = 0; d < dimension; d++)
+                    centroid[d] += localSums[t][d];
+            }
+        } else {
+            // Sequential path
+            for (int idx : indices) {
+                float[] point = data[idx];
+                for (int d = 0; d < dimension; d++)
+                    centroid[d] += point[d];
+            }
         }
 
         float invCnt = 1.0f / (float)cnt;
@@ -241,6 +312,8 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
 
         return centroid;
     }
+
+    private static final int PARALLEL_LEAF_LOSS_THRESHOLD = 1000;
 
     private void assignLeafIdsAndCollect(Node node,
         float[][] data,
@@ -257,9 +330,25 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
             leafCentroidsList.add(node.centroid);
 
             if (node.pointIndices != null) {
-                for (int idx : node.pointIndices) {
-                    leafAssignments[idx] = leafId;
-                    lossAccumulator.val += distFn.compute(data[idx], node.centroid);
+                int[] indices = node.pointIndices;
+                float[] centroid = node.centroid;
+
+                if (indices.length >= PARALLEL_LEAF_LOSS_THRESHOLD) {
+                    // Parallel loss computation for large leaves
+                    double loss = IntStream.of(indices).parallel()
+                        .mapToDouble(idx -> distFn.compute(data[idx], centroid))
+                        .sum();
+                    lossAccumulator.val += (float) loss;
+
+                    // Sequential assignment (fast, no synchronization needed)
+                    for (int idx : indices)
+                        leafAssignments[idx] = leafId;
+                } else {
+                    // Sequential path for small leaves
+                    for (int idx : indices) {
+                        leafAssignments[idx] = leafId;
+                        lossAccumulator.val += distFn.compute(data[idx], centroid);
+                    }
                 }
             }
         }

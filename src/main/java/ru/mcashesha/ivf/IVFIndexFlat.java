@@ -1,7 +1,10 @@
 package ru.mcashesha.ivf;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicIntegerArray;
+import java.util.stream.IntStream;
 import ru.mcashesha.kmeans.KMeans;
 import ru.mcashesha.metrics.Metric;
 
@@ -17,13 +20,9 @@ public class IVFIndexFlat implements IVFIndex {
     private boolean built;
 
     private Metric.DistanceFunction distFn;
-    private float[] centroidDistances;
-    private int[] clusterOrder;
 
-    private int[] heapIdsBuf;
-    private float[] heapDistancesBuf;
-    private int[] heapClusterIdsBuf;
-    private static final int DEFAULT_HEAP_BUF_SIZE = 256;
+    private static final int PARALLEL_CENTROID_THRESHOLD = 32;
+    private static final int PARALLEL_CLUSTER_SCAN_THRESHOLD = 2000;
 
     public IVFIndexFlat(KMeans<? extends KMeans.ClusteringResult> kMeans) {
         if (kMeans == null)
@@ -105,30 +104,52 @@ public class IVFIndexFlat implements IVFIndex {
 
         float[][] reorderedData = new float[vectors.length][];
         int[] reorderedIds = new int[vectors.length];
-        int[] writePos = new int[clusterCnt];
-        System.arraycopy(clusterOffsets, 0, writePos, 0, clusterCnt);
 
-        for (int i = 0; i < assignments.length; i++) {
-            int c = assignments[i];
-            if (c < 0 || c >= clusterCnt)
-                continue;
-            int pos = writePos[c]++;
-            reorderedData[pos] = vectors[i];
-            reorderedIds[pos] = originalIds[i];
+        int n = assignments.length;
+
+        if (n >= 10000) {
+            // Parallel reordering using atomic counters
+            // Pass 1: Compute target positions using atomic increments
+            AtomicIntegerArray atomicOffsets = new AtomicIntegerArray(clusterCnt);
+            int[] targetPos = new int[n];
+
+            IntStream.range(0, n).parallel().forEach(i -> {
+                int c = assignments[i];
+                if (c >= 0 && c < clusterCnt) {
+                    int localOffset = atomicOffsets.getAndIncrement(c);
+                    targetPos[i] = clusterOffsets[c] + localOffset;
+                } else {
+                    targetPos[i] = -1;  // Invalid assignment
+                }
+            });
+
+            // Pass 2: Parallel scatter to target positions
+            IntStream.range(0, n).parallel().forEach(i -> {
+                int pos = targetPos[i];
+                if (pos >= 0) {
+                    reorderedData[pos] = vectors[i];
+                    reorderedIds[pos] = originalIds[i];
+                }
+            });
+        } else {
+            // Sequential path for small datasets
+            int[] writePos = new int[clusterCnt];
+            System.arraycopy(clusterOffsets, 0, writePos, 0, clusterCnt);
+
+            for (int i = 0; i < n; i++) {
+                int c = assignments[i];
+                if (c < 0 || c >= clusterCnt)
+                    continue;
+                int pos = writePos[c]++;
+                reorderedData[pos] = vectors[i];
+                reorderedIds[pos] = originalIds[i];
+            }
         }
 
         this.data = reorderedData;
         this.ids = reorderedIds;
 
         this.distFn = kMeans.getMetricType().resolveFunction(kMeans.getMetricEngine());
-        this.centroidDistances = new float[clusterCnt];
-        this.clusterOrder = new int[clusterCnt];
-        for (int c = 0; c < clusterCnt; c++)
-            clusterOrder[c] = c;
-
-        this.heapIdsBuf = new int[DEFAULT_HEAP_BUF_SIZE];
-        this.heapDistancesBuf = new float[DEFAULT_HEAP_BUF_SIZE];
-        this.heapClusterIdsBuf = new int[DEFAULT_HEAP_BUF_SIZE];
 
         this.built = true;
     }
@@ -153,74 +174,7 @@ public class IVFIndexFlat implements IVFIndex {
         if (topK <= 0)
             throw new IllegalArgumentException("topK must be > 0");
 
-        int clusterCnt = centroids.length;
-        if (clusterCnt == 0)
-            return List.of();
-
-        nProbe = Math.max(1, Math.min(nProbe, clusterCnt));
-
-        Metric.DistanceFunction fn = this.distFn;
-
-        for (int c = 0; c < clusterCnt; c++)
-            centroidDistances[c] = fn.compute(qry, centroids[c]);
-
-        selectNearestClusters(centroidDistances, clusterOrder, clusterCnt, nProbe);
-
-        int[] heapIds;
-        float[] heapDistances;
-        int[] heapClusterIds;
-        if (topK <= heapIdsBuf.length) {
-            heapIds = heapIdsBuf;
-            heapDistances = heapDistancesBuf;
-            heapClusterIds = heapClusterIdsBuf;
-        } else {
-            heapIds = new int[topK];
-            heapDistances = new float[topK];
-            heapClusterIds = new int[topK];
-        }
-        int heapSize = 0;
-
-        for (int p = 0; p < nProbe; p++) {
-            int clusterId = clusterOrder[p];
-            int start = clusterOffsets[clusterId];
-            int end = clusterOffsets[clusterId + 1];
-
-            for (int i = start; i < end; i++) {
-                float d = fn.compute(qry, data[i]);
-
-                if (heapSize < topK) {
-                    heapIds[heapSize] = ids[i];
-                    heapDistances[heapSize] = d;
-                    heapClusterIds[heapSize] = clusterId;
-                    heapSize++;
-                    if (heapSize == topK)
-                        buildMaxHeap(heapDistances, heapIds, heapClusterIds, heapSize);
-                }
-                else if (d < heapDistances[0]) {
-                    heapIds[0] = ids[i];
-                    heapDistances[0] = d;
-                    heapClusterIds[0] = clusterId;
-                    siftDown(heapDistances, heapIds, heapClusterIds, 0, heapSize);
-                }
-            }
-        }
-
-        if (heapSize > 0 && heapSize < topK)
-            buildMaxHeap(heapDistances, heapIds, heapClusterIds, heapSize);
-
-        SearchResult[] sorted = new SearchResult[heapSize];
-        for (int i = heapSize - 1; i >= 0; i--) {
-            sorted[i] = new SearchResult(heapIds[0], heapDistances[0], heapClusterIds[0]);
-            heapSize--;
-            if (heapSize > 0) {
-                heapIds[0] = heapIds[heapSize];
-                heapDistances[0] = heapDistances[heapSize];
-                heapClusterIds[0] = heapClusterIds[heapSize];
-                siftDown(heapDistances, heapIds, heapClusterIds, 0, heapSize);
-            }
-        }
-
-        return Arrays.asList(sorted);
+        return searchInternal(qry, topK, nProbe);
     }
 
     /**
@@ -305,5 +259,209 @@ public class IVFIndexFlat implements IVFIndex {
 
     @Override public int getDimension() {
         return dimension;
+    }
+
+    /**
+     * Batch search for multiple queries in parallel.
+     * Each query is processed independently, allowing full parallelization.
+     */
+    @Override public List<List<SearchResult>> searchBatch(float[][] queries, int topK, int nProbe) {
+        if (!built)
+            throw new IllegalStateException("Index is not built yet");
+        if (queries == null || queries.length == 0)
+            throw new IllegalArgumentException("queries must be non-empty");
+        if (topK <= 0)
+            throw new IllegalArgumentException("topK must be > 0");
+
+        for (int i = 0; i < queries.length; i++) {
+            if (queries[i] == null || queries[i].length != dimension)
+                throw new IllegalArgumentException("query[" + i + "] must be non-null and match index dimension");
+        }
+
+        int numQueries = queries.length;
+
+        // Parallel search for all queries
+        @SuppressWarnings("unchecked")
+        List<SearchResult>[] results = new List[numQueries];
+
+        IntStream.range(0, numQueries).parallel().forEach(q ->
+            results[q] = searchInternal(queries[q], topK, nProbe));
+
+        return Arrays.asList(results);
+    }
+
+    /**
+     * Internal search method that doesn't use shared buffers (thread-safe).
+     */
+    private List<SearchResult> searchInternal(float[] qry, int topK, int nProbe) {
+        int clusterCnt = centroids.length;
+        if (clusterCnt == 0)
+            return List.of();
+
+        nProbe = Math.max(1, Math.min(nProbe, clusterCnt));
+
+        Metric.DistanceFunction fn = this.distFn;
+
+        // Thread-local buffers
+        float[] localCentroidDistances = new float[clusterCnt];
+        int[] localClusterOrder = new int[clusterCnt];
+
+        // Compute centroid distances - parallelize for large cluster counts
+        if (clusterCnt >= PARALLEL_CENTROID_THRESHOLD) {
+            IntStream.range(0, clusterCnt).parallel().forEach(c ->
+                localCentroidDistances[c] = fn.compute(qry, centroids[c]));
+        } else {
+            for (int c = 0; c < clusterCnt; c++)
+                localCentroidDistances[c] = fn.compute(qry, centroids[c]);
+        }
+
+        // Select nearest clusters
+        for (int c = 0; c < clusterCnt; c++)
+            localClusterOrder[c] = c;
+        selectNearestClusters(localCentroidDistances, localClusterOrder, clusterCnt, nProbe);
+
+        // Calculate total points to scan for parallel decision
+        int totalPointsToScan = 0;
+        for (int p = 0; p < nProbe; p++) {
+            int clusterId = localClusterOrder[p];
+            totalPointsToScan += clusterOffsets[clusterId + 1] - clusterOffsets[clusterId];
+        }
+
+        // Use parallel cluster scanning for large workloads
+        if (totalPointsToScan >= PARALLEL_CLUSTER_SCAN_THRESHOLD && nProbe >= 2) {
+            return searchClustersParallel(qry, topK, nProbe, localClusterOrder, fn);
+        }
+
+        // Sequential cluster scanning
+        return searchClustersSequential(qry, topK, nProbe, localClusterOrder, fn);
+    }
+
+    private List<SearchResult> searchClustersSequential(float[] qry, int topK, int nProbe,
+                                                         int[] localClusterOrder, Metric.DistanceFunction fn) {
+        int[] heapIds = new int[topK];
+        float[] heapDistances = new float[topK];
+        int[] heapClusterIds = new int[topK];
+        int heapSize = 0;
+
+        for (int p = 0; p < nProbe; p++) {
+            int clusterId = localClusterOrder[p];
+            int start = clusterOffsets[clusterId];
+            int end = clusterOffsets[clusterId + 1];
+
+            for (int i = start; i < end; i++) {
+                float d = fn.compute(qry, data[i]);
+
+                if (heapSize < topK) {
+                    heapIds[heapSize] = ids[i];
+                    heapDistances[heapSize] = d;
+                    heapClusterIds[heapSize] = clusterId;
+                    heapSize++;
+                    if (heapSize == topK)
+                        buildMaxHeap(heapDistances, heapIds, heapClusterIds, heapSize);
+                }
+                else if (d < heapDistances[0]) {
+                    heapIds[0] = ids[i];
+                    heapDistances[0] = d;
+                    heapClusterIds[0] = clusterId;
+                    siftDown(heapDistances, heapIds, heapClusterIds, 0, heapSize);
+                }
+            }
+        }
+
+        return extractSortedResults(heapIds, heapDistances, heapClusterIds, heapSize, topK);
+    }
+
+    private List<SearchResult> searchClustersParallel(float[] qry, int topK, int nProbe,
+                                                       int[] localClusterOrder, Metric.DistanceFunction fn) {
+        // Each cluster builds its own local top-K heap
+        int[][] localHeapIds = new int[nProbe][topK];
+        float[][] localHeapDistances = new float[nProbe][topK];
+        int[][] localHeapClusterIds = new int[nProbe][topK];
+        int[] localHeapSizes = new int[nProbe];
+
+        // Parallel per-cluster scanning
+        IntStream.range(0, nProbe).parallel().forEach(p -> {
+            int clusterId = localClusterOrder[p];
+            int start = clusterOffsets[clusterId];
+            int end = clusterOffsets[clusterId + 1];
+
+            int[] hIds = localHeapIds[p];
+            float[] hDist = localHeapDistances[p];
+            int[] hCluster = localHeapClusterIds[p];
+            int hSize = 0;
+
+            for (int i = start; i < end; i++) {
+                float d = fn.compute(qry, data[i]);
+
+                if (hSize < topK) {
+                    hIds[hSize] = ids[i];
+                    hDist[hSize] = d;
+                    hCluster[hSize] = clusterId;
+                    hSize++;
+                    if (hSize == topK)
+                        buildMaxHeap(hDist, hIds, hCluster, hSize);
+                }
+                else if (d < hDist[0]) {
+                    hIds[0] = ids[i];
+                    hDist[0] = d;
+                    hCluster[0] = clusterId;
+                    siftDown(hDist, hIds, hCluster, 0, hSize);
+                }
+            }
+
+            localHeapSizes[p] = hSize;
+        });
+
+        // Merge all per-cluster heaps into final top-K
+        int[] mergedIds = new int[topK];
+        float[] mergedDistances = new float[topK];
+        int[] mergedClusterIds = new int[topK];
+        int mergedSize = 0;
+
+        for (int p = 0; p < nProbe; p++) {
+            int hSize = localHeapSizes[p];
+            int[] hIds = localHeapIds[p];
+            float[] hDist = localHeapDistances[p];
+            int[] hCluster = localHeapClusterIds[p];
+
+            for (int j = 0; j < hSize; j++) {
+                if (mergedSize < topK) {
+                    mergedIds[mergedSize] = hIds[j];
+                    mergedDistances[mergedSize] = hDist[j];
+                    mergedClusterIds[mergedSize] = hCluster[j];
+                    mergedSize++;
+                    if (mergedSize == topK)
+                        buildMaxHeap(mergedDistances, mergedIds, mergedClusterIds, mergedSize);
+                }
+                else if (hDist[j] < mergedDistances[0]) {
+                    mergedIds[0] = hIds[j];
+                    mergedDistances[0] = hDist[j];
+                    mergedClusterIds[0] = hCluster[j];
+                    siftDown(mergedDistances, mergedIds, mergedClusterIds, 0, mergedSize);
+                }
+            }
+        }
+
+        return extractSortedResults(mergedIds, mergedDistances, mergedClusterIds, mergedSize, topK);
+    }
+
+    private List<SearchResult> extractSortedResults(int[] heapIds, float[] heapDistances,
+                                                     int[] heapClusterIds, int heapSize, int topK) {
+        if (heapSize > 0 && heapSize < topK)
+            buildMaxHeap(heapDistances, heapIds, heapClusterIds, heapSize);
+
+        SearchResult[] sorted = new SearchResult[heapSize];
+        for (int i = heapSize - 1; i >= 0; i--) {
+            sorted[i] = new SearchResult(heapIds[0], heapDistances[0], heapClusterIds[0]);
+            heapSize--;
+            if (heapSize > 0) {
+                heapIds[0] = heapIds[heapSize];
+                heapDistances[0] = heapDistances[heapSize];
+                heapClusterIds[0] = heapClusterIds[heapSize];
+                siftDown(heapDistances, heapIds, heapClusterIds, 0, heapSize);
+            }
+        }
+
+        return Arrays.asList(sorted);
     }
 }

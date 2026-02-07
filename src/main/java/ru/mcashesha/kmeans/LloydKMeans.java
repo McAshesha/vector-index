@@ -2,6 +2,7 @@ package ru.mcashesha.kmeans;
 
 import java.util.Arrays;
 import java.util.Random;
+import java.util.stream.IntStream;
 import ru.mcashesha.metrics.Metric;
 
 class LloydKMeans implements KMeans<LloydKMeans.Result> {
@@ -45,6 +46,8 @@ class LloydKMeans implements KMeans<LloydKMeans.Result> {
         return metricEngine;
     }
 
+    private static final int PRUNING_THRESHOLD = 64;  // Use pruning when k >= this
+
     @Override public Result fit(float[][] data) {
         if (data == null || data.length == 0)
             throw new IllegalArgumentException("data must be non-null and non-empty");
@@ -73,10 +76,21 @@ class LloydKMeans implements KMeans<LloydKMeans.Result> {
         float[] pointErrors = new float[sampleCnt];
         boolean[] taken = new boolean[sampleCnt];
 
+        // Precompute centroid distances for triangle inequality pruning (when beneficial)
+        boolean usePruning = clusterCnt >= PRUNING_THRESHOLD && sampleCnt >= 1000;
+        float[][] centroidDistances = null;
+
         int performedIterations = 0;
 
         for (int iteration = 0; iteration < maxIterations; iteration++) {
-            KMeansUtils.assignPointsToClusters(data, centroids, clusterCnt, labels, pointErrors, null, distFn);
+            if (usePruning) {
+                // Recompute centroid distances each iteration
+                centroidDistances = KMeansUtils.precomputeCentroidDistances(centroids, distFn);
+                KMeansUtils.assignPointsToClustersWithPruning(
+                    data, centroids, centroidDistances, clusterCnt, labels, pointErrors, null, distFn);
+            } else {
+                KMeansUtils.assignPointsToClusters(data, centroids, clusterCnt, labels, pointErrors, null, distFn);
+            }
 
             KMeansUtils.recomputeCentroids(data, labels, newCentroids, clusterSizes, clusterCnt, dimension, metricType);
 
@@ -137,9 +151,21 @@ class LloydKMeans implements KMeans<LloydKMeans.Result> {
         return labels;
     }
 
+    private static final int PARALLEL_SHIFT_THRESHOLD = 64;
+
     private float computeMaxCentroidShift(float[][] oldCentroids,
         float[][] newCentroids,
         Metric.DistanceFunction l2DistFn) {
+
+        if (clusterCnt >= PARALLEL_SHIFT_THRESHOLD) {
+            // Parallel max reduction
+            return (float) IntStream.range(0, clusterCnt).parallel()
+                .mapToDouble(c -> l2DistFn.compute(oldCentroids[c], newCentroids[c]))
+                .max()
+                .orElse(0);
+        }
+
+        // Sequential path
         float maxShift = 0;
 
         for (int c = 0; c < clusterCnt; c++) {
