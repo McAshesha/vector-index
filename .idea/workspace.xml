@@ -4,18 +4,8 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="dfb42b19-6457-4a8c-a18e-e9567e537ac6" name="Changes" comment="update from selection sort to min-heap в IVFIndexFlat">
+    <list default="true" id="dfb42b19-6457-4a8c-a18e-e9567e537ac6" name="Changes" comment="performance improvement, adding parallelization">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pom.xml" beforeDir="false" afterPath="$PROJECT_DIR$/pom.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/ru/mcashesha/IVFIndexBuildBenchmarks.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/ru/mcashesha/IVFIndexBuildBenchmarks.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/ru/mcashesha/IVFIndexSearchBenchmarks.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/ru/mcashesha/IVFIndexSearchBenchmarks.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/ru/mcashesha/VectorIndexBenchmark.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/ru/mcashesha/VectorIndexBenchmark.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/ru/mcashesha/ivf/IVFIndex.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/ru/mcashesha/ivf/IVFIndex.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/ru/mcashesha/ivf/IVFIndexFlat.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/ru/mcashesha/ivf/IVFIndexFlat.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/ru/mcashesha/kmeans/HierarchicalKMeans.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/ru/mcashesha/kmeans/HierarchicalKMeans.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/ru/mcashesha/kmeans/KMeansUtils.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/ru/mcashesha/kmeans/KMeansUtils.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/ru/mcashesha/kmeans/LloydKMeans.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/ru/mcashesha/kmeans/LloydKMeans.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/ru/mcashesha/kmeans/MiniBatchKMeans.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/ru/mcashesha/kmeans/MiniBatchKMeans.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -28,7 +18,8 @@
     </persistenceIdMap>
   </component>
   <component name="EmbeddingIndexingInfo">
-    <option name="cachedIndexableFilesCount" value="195" />
+    <option name="cachedIndexableFilesCount" value="228" />
+    <option name="fileBasedEmbeddingIndicesEnabled" value="true" />
   </component>
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -138,14 +129,23 @@
       <option name="project" value="LOCAL" />
       <updated>1770217549078</updated>
     </task>
-    <option name="localTasksCounter" value="4" />
+    <task id="LOCAL-00004" summary="performance improvement, adding parallelization">
+      <option name="closed" value="true" />
+      <created>1770468985445</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1770468985445</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="add old sources" />
     <MESSAGE value="update name module" />
     <MESSAGE value="update from selection sort to min-heap в IVFIndexFlat" />
-    <option name="LAST_COMMIT_MESSAGE" value="update from selection sort to min-heap в IVFIndexFlat" />
+    <MESSAGE value="performance improvement, adding parallelization" />
+    <option name="LAST_COMMIT_MESSAGE" value="performance improvement, adding parallelization" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>
