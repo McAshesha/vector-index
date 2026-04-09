@@ -1,4 +1,3 @@
-<!-- JMH benchmarks + JNI + CMake -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -11,32 +10,16 @@
     <packaging>jar</packaging>
 
     <name>vector-index</name>
-    <description>JMH benchmarks for vector index with JNI + SimSIMD</description>
+    <description>Vector similarity search library with IVF indexes and JNI + SimSIMD</description>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-
-        <jmh.version>1.37</jmh.version>
         <javac.target>17</javac.target>
-
-        <uberjar.name>benchmarks</uberjar.name>
-
         <native.source.dir>${project.basedir}/src/main/native</native.source.dir>
-        <native.build.dir>${native.source.dir}/build</native.build.dir>
+        <native.build.dir>${project.build.directory}/native-build</native.build.dir>
     </properties>
 
     <dependencies>
-        <dependency>
-            <groupId>org.openjdk.jmh</groupId>
-            <artifactId>jmh-core</artifactId>
-            <version>${jmh.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.openjdk.jmh</groupId>
-            <artifactId>jmh-generator-annprocess</artifactId>
-            <version>${jmh.version}</version>
-            <scope>provided</scope>
-        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
@@ -46,6 +29,24 @@
     </dependencies>
 
     <build>
+        <!--
+          Include the native library built by CMake as a JAR resource.
+          CMake outputs to: target/native-build/native/<os>-<arch>/<libname>
+          This becomes:     /native/<os>-<arch>/<libname> inside the JAR.
+          NativeLibLoader extracts it to a temp dir at runtime.
+        -->
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <resource>
+                <directory>${native.build.dir}</directory>
+                <includes>
+                    <include>native/**</include>
+                </includes>
+            </resource>
+        </resources>
+
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -59,15 +60,14 @@
                         <arg>--add-modules</arg>
                         <arg>jdk.incubator.vector</arg>
                     </compilerArgs>
-                    <annotationProcessorPaths>
-                        <path>
-                            <groupId>org.openjdk.jmh</groupId>
-                            <artifactId>jmh-generator-annprocess</artifactId>
-                            <version>${jmh.version}</version>
-                        </path>
-                    </annotationProcessorPaths>
                 </configuration>
             </plugin>
+
+            <!--
+              Native build via CMake.
+              Build directory is under target/ so it gets cleaned by mvn clean.
+              Skip with: mvn package -Dexec.skip=true
+            -->
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
@@ -80,9 +80,10 @@
                             <goal>exec</goal>
                         </goals>
                         <configuration>
-                            <workingDirectory>${native.source.dir}</workingDirectory>
                             <executable>cmake</executable>
                             <arguments>
+                                <argument>-S</argument>
+                                <argument>${native.source.dir}</argument>
                                 <argument>-B</argument>
                                 <argument>${native.build.dir}</argument>
                                 <argument>-DCMAKE_BUILD_TYPE=Release</argument>
@@ -96,7 +97,6 @@
                             <goal>exec</goal>
                         </goals>
                         <configuration>
-                            <workingDirectory>${native.source.dir}</workingDirectory>
                             <executable>cmake</executable>
                             <arguments>
                                 <argument>--build</argument>
@@ -108,45 +108,14 @@
                     </execution>
                 </executions>
             </plugin>
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
                 <configuration>
-                    <argLine>--add-modules jdk.incubator.vector -Djava.library.path=${native.build.dir}</argLine>
+                    <argLine>--add-modules jdk.incubator.vector</argLine>
                 </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.2.1</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>shade</goal>
-                        </goals>
-                        <configuration>
-                            <finalName>${uberjar.name}</finalName>
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>org.openjdk.jmh.Main</mainClass>
-                                </transformer>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
-                            </transformers>
-                            <filters>
-                                <filter>
-                                    <artifact>*:*</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/*.SF</exclude>
-                                        <exclude>META-INF/*.DSA</exclude>
-                                        <exclude>META-INF/*.RSA</exclude>
-                                    </excludes>
-                                </filter>
-                            </filters>
-                        </configuration>
-                    </execution>
-                </executions>
             </plugin>
         </plugins>
     </build>

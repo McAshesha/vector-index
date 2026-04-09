@@ -14,14 +14,12 @@ package ru.mcashesha.metrics;
  * the Java array data, avoiding the overhead of copying array contents between the
  * JVM heap and native memory.</p>
  *
- * <h3>Requirements</h3>
- * <ul>
- *   <li>The {@code simsimd_jni} native library must be on the JVM library path
- *       (set via {@code -Djava.library.path=...} or the system's default library path).</li>
- *   <li>The native library is built automatically by the Maven build via CMake
- *       and placed in {@code src/main/native/build/}.</li>
- *   <li>Native access must be enabled via {@code --enable-native-access=ALL-UNNAMED}.</li>
- * </ul>
+ * <h3>Loading</h3>
+ * <p>The native library is loaded automatically by {@link NativeLibLoader}, which first
+ * attempts to extract it from a bundled JAR resource ({@code /native/<os>-<arch>/<libname>})
+ * into a temporary directory.  If the resource is not found, it falls back to
+ * {@link System#loadLibrary(String)}, which searches {@code java.library.path}.
+ * In most cases no JVM flags are required to use this engine.</p>
  *
  * @see Metric
  * @see Scalar   Pure Java baseline for comparison
@@ -29,13 +27,8 @@ package ru.mcashesha.metrics;
  */
 class SimSIMD implements Metric {
 
-    /*
-     * Static initializer loads the native shared library (e.g., libsimsimd_jni.so on Linux,
-     * libsimsimd_jni.dylib on macOS). This runs once when the class is first referenced,
-     * making all native methods available for invocation.
-     */
     static {
-        System.loadLibrary("simsimd_jni");
+        NativeLibLoader.load();
     }
 
     /**

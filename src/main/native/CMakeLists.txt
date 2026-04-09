@@ -1,107 +1,116 @@
 # ===========================================================================
-# CMakeLists.txt -- Build configuration for the SimSIMD JNI shared library
+# CMakeLists.txt -- Cross-platform build for the SimSIMD JNI shared library
 # ===========================================================================
 #
-# This CMake project compiles the JNI bridge (simsimd_jni.c) into a native
-# shared library (libsimsimd_jni.so on Linux, libsimsimd_jni.dylib on macOS).
+# Produces: native/<os>-<arch>/<libname>
+#   Linux:   native/linux-amd64/libsimsimd_jni.so
+#   macOS:   native/macos-aarch64/libsimsimd_jni.dylib
+#   Windows: native/windows-amd64/simsimd_jni.dll
 #
-# The resulting library is loaded at runtime by Java's System.loadLibrary()
-# call in the SimSIMD class, providing hardware-accelerated vector distance
-# computations (L2, dot product, cosine, Hamming) via the SimSIMD C library.
-#
-# Build invocation (from the project root, handled automatically by Maven):
-#   cmake -S src/main/native -B src/main/native/build
-#   cmake --build src/main/native/build
+# Build (handled automatically by Maven):
+#   cmake -S src/main/native -B target/native-build -DCMAKE_BUILD_TYPE=Release
+#   cmake --build target/native-build --config Release
 # ===========================================================================
 
-# ---------------------------------------------------------------------------
-# Minimum CMake version and project declaration
-# ---------------------------------------------------------------------------
-# CMake 3.16+ is required for FetchContent_MakeAvailable (introduced in 3.14)
-# and modern JNI discovery.  The project is pure C (no C++ needed).
 cmake_minimum_required(VERSION 3.16)
-
 project(simsimd_jni C)
 
 # ---------------------------------------------------------------------------
-# Compiler standards and shared-library settings
+# Compiler standards
 # ---------------------------------------------------------------------------
-# C99 is sufficient for both the JNI glue code and the SimSIMD headers.
-# Position-independent code (-fPIC) is mandatory for objects that will be
-# linked into a shared library; setting it globally ensures all translation
-# units (including fetched dependencies) are compiled with -fPIC.
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # ---------------------------------------------------------------------------
+# Platform detection -- produces NATIVE_OS and NATIVE_ARCH matching
+# the naming convention used by NativeLibLoader.java
+# ---------------------------------------------------------------------------
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(NATIVE_OS "linux")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(NATIVE_OS "macos")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(NATIVE_OS "windows")
+else()
+    message(FATAL_ERROR "Unsupported OS: ${CMAKE_SYSTEM_NAME}")
+endif()
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+    set(NATIVE_ARCH "amd64")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+    set(NATIVE_ARCH "aarch64")
+else()
+    message(FATAL_ERROR "Unsupported architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+
+message(STATUS "Target platform: ${NATIVE_OS}-${NATIVE_ARCH}")
+
+# ---------------------------------------------------------------------------
+# Output directories -- native/<os>-<arch>/ under the build tree.
+# CMAKE_RUNTIME_OUTPUT_DIRECTORY is needed for Windows DLLs.
+# ---------------------------------------------------------------------------
+set(NATIVE_OUTPUT_DIR ${CMAKE_BINARY_DIR}/native/${NATIVE_OS}-${NATIVE_ARCH})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${NATIVE_OUTPUT_DIR})
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${NATIVE_OUTPUT_DIR})
+
+# Multi-config generators (Visual Studio, Xcode) append a per-config subdir
+# (e.g. Release/) unless we suppress it for every config.
+foreach(CONFIG_TYPE Release Debug RelWithDebInfo MinSizeRel)
+    string(TOUPPER ${CONFIG_TYPE} CONFIG_UPPER)
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${CONFIG_UPPER} ${NATIVE_OUTPUT_DIR})
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CONFIG_UPPER} ${NATIVE_OUTPUT_DIR})
+endforeach()
+
+# ---------------------------------------------------------------------------
 # Locate JNI headers (jni.h, jni_md.h)
 # ---------------------------------------------------------------------------
-# find_package(JNI REQUIRED) detects the active JDK via JAVA_HOME or system
-# paths and populates JNI_INCLUDE_DIRS with the directories containing
-# jni.h and the platform-specific jni_md.h.
 find_package(JNI REQUIRED)
 
 # ---------------------------------------------------------------------------
-# Fetch SimSIMD from GitHub (header-only SIMD distance library)
+# Fetch SimSIMD (header-only SIMD distance library)
 # ---------------------------------------------------------------------------
-# FetchContent downloads the SimSIMD repository at configure time so that its
-# headers are available without requiring a manual install.  GIT_SHALLOW TRUE
-# clones only the latest commit on the main branch to minimize download size.
+# TODO: pin to a release tag (e.g. GIT_TAG v6.2.1) for reproducible builds
 include(FetchContent)
-
 FetchContent_Declare(
     simsimd
     GIT_REPOSITORY https://github.com/ashvardanian/SimSIMD.git
-    GIT_TAG main
-    GIT_SHALLOW TRUE
+    GIT_TAG        main
+    GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(simsimd)
 
 # ---------------------------------------------------------------------------
-# Define the shared library target
+# Shared library target
 # ---------------------------------------------------------------------------
-# The single source file (simsimd_jni.c) implements four JNI native methods.
-# Building as SHARED produces a dynamically loadable library that the JVM can
-# load via System.loadLibrary("simsimd_jni").
-add_library(simsimd_jni SHARED
-    simsimd_jni.c
-)
+add_library(simsimd_jni SHARED simsimd_jni.c)
 
-# ---------------------------------------------------------------------------
-# Include directories
-# ---------------------------------------------------------------------------
-# Two sets of headers are needed:
-#   1. JNI_INCLUDE_DIRS  -- jni.h and jni_md.h from the JDK
-#   2. simsimd include   -- simsimd/simsimd.h from the fetched source tree
-# Both are PRIVATE because they are only needed to compile this library, not
-# by consumers that link against it.
 target_include_directories(simsimd_jni PRIVATE
     ${JNI_INCLUDE_DIRS}
     ${simsimd_SOURCE_DIR}/include
 )
 
 # ---------------------------------------------------------------------------
-# Aggressive optimization flags (GCC and Clang only)
+# Platform-specific optimization flags
 # ---------------------------------------------------------------------------
-#   -O3           : highest standard optimization level; enables vectorization,
-#                   inlining, loop unrolling, and other transformations.
-#   -march=native : generate instructions for the host CPU's exact
-#                   microarchitecture (AVX-512, AVX2, SSE4.2, NEON, etc.).
-#                   This maximizes SIMD throughput but means the binary is
-#                   NOT portable to older CPUs.
-#   -ffast-math   : relax IEEE 754 compliance for faster floating-point code
-#                   (allows reordering, fused multiply-add, etc.).  Acceptable
-#                   here because approximate distance comparisons tolerate
-#                   small numerical differences.
-if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+# -march=native generates code for the host CPU (AVX-512, AVX2, NEON, etc.).
+# The resulting binary is optimal for the build machine but not portable
+# to CPUs with fewer instruction sets.  This is acceptable for a library
+# that users build from source.
+if(MSVC)
+    target_compile_options(simsimd_jni PRIVATE /O2 /fp:fast)
+    if(NATIVE_ARCH STREQUAL "amd64")
+        target_compile_options(simsimd_jni PRIVATE /arch:AVX2)
+    endif()
+elseif(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     target_compile_options(simsimd_jni PRIVATE -O3 -march=native -ffast-math)
 endif()
 
 # ---------------------------------------------------------------------------
-# Linking notes
+# Windows: suppress the "lib" prefix so the file is simsimd_jni.dll,
+# matching System.mapLibraryName("simsimd_jni") on Windows.
+# On Unix, CMake already produces lib<name>.so / lib<name>.dylib by default,
+# which matches System.mapLibraryName("simsimd_jni").
 # ---------------------------------------------------------------------------
-# On most platforms the JNI shared library does NOT need to link against
-# libjvm; the JVM provides the JNI function table at load time.  The
-# commented-out line below is retained for reference in case explicit linking
-# is ever required on a specific platform.
-# target_link_libraries(simsimd_jni PRIVATE ${JNI_LIBRARIES})
+if(WIN32)
+    set_target_properties(simsimd_jni PROPERTIES PREFIX "")
+endif()
