@@ -75,15 +75,23 @@ final class NativeLibLoader {
                         "Native library not found in JAR: " + resourcePath);
             }
 
-            Path tempDir = Files.createTempDirectory("simsimd_jni");
-            Path tempLib = tempDir.resolve(libFileName);
-            Files.copy(in, tempLib, StandardCopyOption.REPLACE_EXISTING);
+            // Deterministic path avoids temp file accumulation across JVM restarts.
+            Path cacheDir = Path.of(System.getProperty("java.io.tmpdir"), "simsimd_jni_cache");
+            Files.createDirectories(cacheDir);
+            Path cachedLib = cacheDir.resolve(libFileName);
+
+            long resourceSize = in.available();
+            boolean alreadyCached = Files.exists(cachedLib) && Files.size(cachedLib) == resourceSize;
+
+            if (!alreadyCached) {
+                Files.copy(in, cachedLib, StandardCopyOption.REPLACE_EXISTING);
+            }
 
             // Best-effort cleanup on JVM shutdown
-            tempLib.toFile().deleteOnExit();
-            tempDir.toFile().deleteOnExit();
+            cachedLib.toFile().deleteOnExit();
+            cacheDir.toFile().deleteOnExit();
 
-            System.load(tempLib.toAbsolutePath().toString());
+            System.load(cachedLib.toAbsolutePath().toString());
         }
     }
 

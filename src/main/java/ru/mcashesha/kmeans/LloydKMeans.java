@@ -2,6 +2,7 @@ package ru.mcashesha.kmeans;
 
 import java.util.Arrays;
 import java.util.Random;
+import java.util.logging.Logger;
 import java.util.stream.IntStream;
 import ru.mcashesha.metrics.Metric;
 
@@ -33,6 +34,8 @@ import ru.mcashesha.metrics.Metric;
  * @see KMeansUtils#assignPointsToClustersWithPruning  Distance-based pruning for intermediate iterations
  */
 class LloydKMeans implements KMeans<LloydKMeans.Result> {
+    private static final Logger LOGGER = Logger.getLogger(LloydKMeans.class.getName());
+
     /** Number of clusters (k) to produce. */
     private final int clusterCnt;
     /** Maximum number of assign-update iterations. */
@@ -98,6 +101,27 @@ class LloydKMeans implements KMeans<LloydKMeans.Result> {
     private static final int PRUNING_THRESHOLD = 64;  // Use pruning when k >= this
 
     /**
+     * Convenience overload for clustering a subset of data identified by indices.
+     * Creates a lightweight view (array of references) internally.
+     *
+     * @param data    the full dataset
+     * @param indices indices into {@code data} identifying the subset to cluster
+     * @return the clustering result (labels are relative to the subset, not the full dataset)
+     */
+    public Result fit(float[][] data, int[] indices) {
+        if (data == null || data.length == 0)
+            throw new IllegalArgumentException("data must be non-null and non-empty");
+        if (indices == null || indices.length == 0)
+            throw new IllegalArgumentException("indices must be non-null and non-empty");
+
+        float[][] subset = new float[indices.length][];
+        for (int i = 0; i < indices.length; i++)
+            subset[i] = data[indices[i]];
+
+        return fit(subset);
+    }
+
+    /**
      * Trains the Lloyd's KMeans model on the provided dataset.
      *
      * <p>Algorithm flow:</p>
@@ -126,9 +150,19 @@ class LloydKMeans implements KMeans<LloydKMeans.Result> {
             );
         }
 
+        if (metricType == Metric.Type.DOT_PRODUCT) {
+            LOGGER.warning("DOT_PRODUCT metric assumes normalized input vectors. "
+                + "Consider COSINE_DISTANCE for unnormalized data.");
+        }
+
         // Resolve the configured distance function and an L2 function for convergence checks
         Metric.DistanceFunction distFn = metricType.resolveFunction(metricEngine);
         Metric.DistanceFunction l2DistFn = Metric.Type.L2SQ_DISTANCE.resolveFunction(metricEngine);
+
+        // For cosine distance, measure convergence by angular change (cosine distance between
+        // old and new centroid) rather than L2 shift, since centroids are on the unit sphere.
+        Metric.DistanceFunction convergenceDistFn = metricType == Metric.Type.COSINE_DISTANCE
+            ? Metric.Type.COSINE_DISTANCE.resolveFunction(metricEngine) : l2DistFn;
 
         // Step 1: KMeans++ initialization
         float[][] centroids = KMeansUtils.initializeCentroidsKMeansPlusPlus(
@@ -150,6 +184,13 @@ class LloydKMeans implements KMeans<LloydKMeans.Result> {
         boolean usePruning = clusterCnt >= PRUNING_THRESHOLD && sampleCnt >= 1000;
         float[][] centroidDistances = null;
 
+        // Pre-allocate thread-local buffers for parallel centroid recomputation.
+        // This avoids allocating O(threads * k * d) memory on every iteration,
+        // which for 16 threads x 1000 clusters x 768 dims would be ~47MB per iteration.
+        int numThreads = Runtime.getRuntime().availableProcessors();
+        float[][][] preallocSums = new float[numThreads][clusterCnt][dimension];
+        int[][] preallocCounts = new int[numThreads][clusterCnt];
+
         int performedIterations = 0;
 
         // Step 2: Iterative assign-update loop
@@ -164,14 +205,15 @@ class LloydKMeans implements KMeans<LloydKMeans.Result> {
             }
 
             // Recompute centroids as the mean of each cluster's assigned points
-            KMeansUtils.recomputeCentroids(data, labels, newCentroids, clusterSizes, clusterCnt, dimension, metricType);
+            KMeansUtils.recomputeCentroids(data, labels, newCentroids, clusterSizes, clusterCnt, dimension, metricType,
+                preallocSums, preallocCounts);
 
             // Redistribute points to fill any clusters that became empty
             KMeansUtils.handleEmptyClusters(data, newCentroids, clusterSizes, labels, pointErrors, taken,
                 clusterCnt, dimension, metricType, random);
 
-            // Convergence check: maximum L2 shift across all centroids
-            float maxShift = computeMaxCentroidShift(centroids, newCentroids, l2DistFn);
+            // Convergence check: maximum centroid shift across all centroids
+            float maxShift = computeMaxCentroidShift(centroids, newCentroids, convergenceDistFn);
 
             // Swap centroid buffers to avoid allocation
             float[][] tmp = centroids;
@@ -242,27 +284,29 @@ class LloydKMeans implements KMeans<LloydKMeans.Result> {
     private static final int PARALLEL_SHIFT_THRESHOLD = 64;
 
     /**
-     * Computes the maximum L2 squared distance between corresponding old and new centroids.
+     * Computes the maximum distance between corresponding old and new centroids.
      *
      * <p>This value measures how much the centroids moved in the current iteration
      * and is used as the convergence criterion. When the maximum shift drops below
-     * the tolerance, the algorithm has converged. Note that this is the squared
-     * Euclidean distance, not the Euclidean distance itself, so the tolerance
-     * should be set accordingly (e.g., 1e-4 corresponds to a centroid shift of ~0.01).</p>
+     * the tolerance, the algorithm has converged.</p>
+     *
+     * <p>For L2/dot-product metrics, this uses L2 squared distance. For cosine distance,
+     * this uses cosine distance between old and new centroid, since centroids are on
+     * the unit sphere and angular change is a more meaningful convergence measure.</p>
      *
      * @param oldCentroids the centroid positions before the update step
      * @param newCentroids the centroid positions after the update step
-     * @param l2DistFn     the L2 squared distance function
-     * @return the maximum L2 squared distance across all centroid pairs
+     * @param distFn       the distance function for measuring centroid shift
+     * @return the maximum distance across all centroid pairs
      */
     private float computeMaxCentroidShift(float[][] oldCentroids,
         float[][] newCentroids,
-        Metric.DistanceFunction l2DistFn) {
+        Metric.DistanceFunction distFn) {
 
         if (clusterCnt >= PARALLEL_SHIFT_THRESHOLD) {
             // Parallel max reduction over all centroid shifts
             return (float) IntStream.range(0, clusterCnt).parallel()
-                .mapToDouble(c -> l2DistFn.compute(oldCentroids[c], newCentroids[c]))
+                .mapToDouble(c -> distFn.compute(oldCentroids[c], newCentroids[c]))
                 .max()
                 .orElse(0);
         }
@@ -271,7 +315,7 @@ class LloydKMeans implements KMeans<LloydKMeans.Result> {
         float maxShift = 0;
 
         for (int c = 0; c < clusterCnt; c++) {
-            float shift = l2DistFn.compute(oldCentroids[c], newCentroids[c]);
+            float shift = distFn.compute(oldCentroids[c], newCentroids[c]);
             if (shift > maxShift)
                 maxShift = shift;
         }

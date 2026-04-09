@@ -17,7 +17,7 @@ package ru.mcashesha.metrics;
  * @see VectorAPI  SIMD-accelerated alternative
  * @see SimSIMD   Native C alternative via JNI
  */
-class Scalar implements Metric {
+class Scalar implements Metric, OffsetMetric {
 
     /**
      * {@inheritDoc}
@@ -28,6 +28,7 @@ class Scalar implements Metric {
      * transformation that does not affect nearest-neighbor ordering.</p>
      */
     @Override public float l2Distance(float[] a, float[] b) {
+        MetricValidation.validateFloatArrays(a, b);
         float sumSq = 0;
 
         for (int i = 0; i < a.length; i++) {
@@ -46,6 +47,7 @@ class Scalar implements Metric {
      * corresponding components across all dimensions.</p>
      */
     @Override public float dotProduct(float[] a, float[] b) {
+        MetricValidation.validateFloatArrays(a, b);
         float sum = 0;
 
         for (int i = 0; i < a.length; i++)
@@ -67,6 +69,7 @@ class Scalar implements Metric {
      * vectors with large component values.</p>
      */
     @Override public float cosineDistance(float[] a, float[] b) {
+        MetricValidation.validateFloatArrays(a, b);
         float dot = 0, sumA = 0, sumB = 0;
 
         for (int i = 0; i < a.length; i++) {
@@ -90,6 +93,7 @@ class Scalar implements Metric {
      * {@link Integer#bitCount(int)}, ensuring correct handling of negative byte values.</p>
      */
     @Override public long hammingDistanceB8(byte[] a, byte[] b) {
+        MetricValidation.validateByteArrays(a, b);
         long distance = 0;
 
         for (int i = 0; i < a.length; i++) {
@@ -100,6 +104,38 @@ class Scalar implements Metric {
         }
 
         return distance;
+    }
+
+    // ======================== Offset-based methods for flat array layout ========================
+
+    /** {@inheritDoc} */
+    @Override public float l2Distance(float[] a, float[] b, int bOffset, int length) {
+        float sumSq = 0;
+        for (int i = 0; i < length; i++) {
+            float diff = a[i] - b[bOffset + i];
+            sumSq += diff * diff;
+        }
+        return sumSq;
+    }
+
+    /** {@inheritDoc} */
+    @Override public float dotProduct(float[] a, float[] b, int bOffset, int length) {
+        float sum = 0;
+        for (int i = 0; i < length; i++)
+            sum += a[i] * b[bOffset + i];
+        return sum;
+    }
+
+    /** {@inheritDoc} */
+    @Override public float cosineDistance(float[] a, float[] b, int bOffset, int length) {
+        float dot = 0, sumA = 0, sumB = 0;
+        for (int i = 0; i < length; i++) {
+            float bi = b[bOffset + i];
+            dot += a[i] * bi;
+            sumA += a[i] * a[i];
+            sumB += bi * bi;
+        }
+        return 1 - (float)(dot / Math.sqrt((double) sumA * sumB));
     }
 
 }

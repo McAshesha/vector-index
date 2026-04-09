@@ -21,9 +21,18 @@ import jdk.incubator.vector.VectorSpecies;
  *   <li>Fused multiply-add (FMA) operations are used wherever possible for both
  *       better numerical accuracy (single rounding instead of two) and higher
  *       throughput (FMA is a single instruction on modern CPUs).</li>
- *   <li>Each method uses a two-phase approach: a vectorized main loop that processes
- *       {@code SPECIES_PREFERRED.length()} elements per iteration, followed by a
- *       scalar tail loop for any remaining elements that do not fill a full vector.</li>
+ *   <li>Dual accumulators are used to saturate the FMA pipeline. Modern CPUs can
+ *       execute 2 FMA operations per cycle but each has 4-5 cycles of latency.
+ *       By maintaining two independent accumulator vectors, the CPU can issue an
+ *       FMA to the second accumulator while the first is still in-flight, effectively
+ *       doubling throughput.</li>
+ *   <li>Each method uses a three-phase approach:
+ *       (1) a dual-vector main loop processing {@code 2 * SPECIES_PREFERRED.length()}
+ *           elements per iteration,
+ *       (2) a single-vector loop for the remainder that is at least one full vector
+ *           wide but not two, and
+ *       (3) a scalar tail loop for any remaining elements that do not fill a full
+ *           vector.</li>
  * </ul>
  *
  * <p>Requires JVM flag {@code --add-modules jdk.incubator.vector} at both compile
@@ -33,7 +42,7 @@ import jdk.incubator.vector.VectorSpecies;
  * @see Scalar   Pure Java baseline for comparison
  * @see SimSIMD  Native C alternative via JNI
  */
-class VectorAPI implements Metric {
+class VectorAPI implements Metric, OffsetMetric {
 
     /**
      * The preferred float vector species for the current hardware.
@@ -59,35 +68,57 @@ class VectorAPI implements Metric {
      * instruction computes {@code diff * diff + sumVec} in a single operation,
      * providing both better throughput and improved numerical precision compared
      * to separate multiply and add operations.</p>
+     *
+     * <p>Dual accumulators saturate the FMA pipeline (2 FMA/cycle throughput vs
+     * 4-5 cycle latency). Processing 2 vector widths per iteration hides the
+     * reduction latency.</p>
      */
     @Override public float l2Distance(float[] a, float[] b) {
-        // Accumulator vector -- each lane independently sums partial squared differences
-        FloatVector sumVec = FloatVector.zero(floatSpecies);
+        MetricValidation.validateFloatArrays(a, b);
+        // Dual accumulator vectors -- two independent accumulators allow the CPU to
+        // issue FMA to sumVec1 while sumVec0's FMA is still in the pipeline, effectively
+        // doubling throughput since modern CPUs can execute 2 FMA/cycle but each has
+        // 4-5 cycles of latency.
+        FloatVector sumVec0 = FloatVector.zero(floatSpecies);
+        FloatVector sumVec1 = FloatVector.zero(floatSpecies);
 
         int index = 0;
+        int speciesLength = floatSpecies.length();
+        int doubleStride = 2 * speciesLength;
 
-        // loopBound rounds down to the nearest multiple of the vector length
-        int upperBound = floatSpecies.loopBound(a.length);
+        // Phase 1: Dual-vector SIMD loop -- process 2 full vector widths per iteration.
+        // The bound ensures we have at least 2 full vectors of data remaining.
+        int upperBound2 = a.length - doubleStride + 1;
 
-        // Main SIMD loop: process one full vector width per iteration
-        for (; index < upperBound; index += floatSpecies.length()) {
-            FloatVector vectorA = FloatVector.fromArray(floatSpecies, a, index);
+        for (; index < upperBound2; index += doubleStride) {
+            FloatVector vectorA0 = FloatVector.fromArray(floatSpecies, a, index);
+            FloatVector vectorB0 = FloatVector.fromArray(floatSpecies, b, index);
+            FloatVector vectorDiff0 = vectorA0.sub(vectorB0);
+            sumVec0 = vectorDiff0.fma(vectorDiff0, sumVec0);
 
-            FloatVector vectorB = FloatVector.fromArray(floatSpecies, b, index);
-
-            FloatVector vectorDiff = vectorA.sub(vectorB);
-
-            // FMA: sumVec += diff * diff (fused multiply-add for accuracy and speed)
-            sumVec = vectorDiff.fma(vectorDiff, sumVec);
+            FloatVector vectorA1 = FloatVector.fromArray(floatSpecies, a, index + speciesLength);
+            FloatVector vectorB1 = FloatVector.fromArray(floatSpecies, b, index + speciesLength);
+            FloatVector vectorDiff1 = vectorA1.sub(vectorB1);
+            sumVec1 = vectorDiff1.fma(vectorDiff1, sumVec1);
         }
 
-        // Horizontal reduction: sum all lanes of the accumulator vector into a scalar
-        float sumSquares = sumVec.reduceLanes(VectorOperators.ADD);
+        // Phase 2: Single-vector SIMD loop -- handle remainder that is at least one
+        // full vector wide but didn't fit into the dual-vector loop.
+        int upperBound1 = floatSpecies.loopBound(a.length);
 
-        // Scalar tail: handle remaining elements that don't fill a full SIMD vector
+        for (; index < upperBound1; index += speciesLength) {
+            FloatVector vectorA = FloatVector.fromArray(floatSpecies, a, index);
+            FloatVector vectorB = FloatVector.fromArray(floatSpecies, b, index);
+            FloatVector vectorDiff = vectorA.sub(vectorB);
+            sumVec0 = vectorDiff.fma(vectorDiff, sumVec0);
+        }
+
+        // Merge the two accumulators and horizontally reduce all lanes into a scalar
+        float sumSquares = sumVec0.add(sumVec1).reduceLanes(VectorOperators.ADD);
+
+        // Phase 3: Scalar tail -- handle remaining elements that don't fill a full SIMD vector
         for (; index < a.length; index++) {
             float diff = a[index] - b[index];
-
             sumSquares += diff * diff;
         }
 
@@ -99,29 +130,50 @@ class VectorAPI implements Metric {
      *
      * <p>Uses FMA to accumulate the element-wise products. The FMA instruction
      * computes {@code a[i] * b[i] + sum} in a single fused operation.</p>
+     *
+     * <p>Dual accumulators saturate the FMA pipeline (2 FMA/cycle throughput vs
+     * 4-5 cycle latency). Processing 2 vector widths per iteration hides the
+     * reduction latency.</p>
      */
     @Override public float dotProduct(float[] a, float[] b) {
-        // Accumulator vector for partial dot product sums across SIMD lanes
-        FloatVector sumVec = FloatVector.zero(floatSpecies);
+        MetricValidation.validateFloatArrays(a, b);
+        // Dual accumulator vectors for partial dot product sums across SIMD lanes.
+        // Two independent accumulators allow the CPU to issue FMA to sumVec1 while
+        // sumVec0's FMA is still in the pipeline.
+        FloatVector sumVec0 = FloatVector.zero(floatSpecies);
+        FloatVector sumVec1 = FloatVector.zero(floatSpecies);
 
         int i = 0;
+        int speciesLength = floatSpecies.length();
+        int doubleStride = 2 * speciesLength;
 
-        int upperBound = floatSpecies.loopBound(a.length);
+        // Phase 1: Dual-vector SIMD loop -- FMA accumulates a[i]*b[i] into two
+        // independent accumulators, processing 2 vector widths per iteration.
+        int upperBound2 = a.length - doubleStride + 1;
 
-        // Main SIMD loop: FMA accumulates a[i]*b[i] into sumVec
-        for (; i < upperBound; i += floatSpecies.length()) {
-            FloatVector va = FloatVector.fromArray(floatSpecies, a, i);
+        for (; i < upperBound2; i += doubleStride) {
+            FloatVector va0 = FloatVector.fromArray(floatSpecies, a, i);
+            FloatVector vb0 = FloatVector.fromArray(floatSpecies, b, i);
+            sumVec0 = va0.fma(vb0, sumVec0);
 
-            FloatVector vb = FloatVector.fromArray(floatSpecies, b, i);
-
-            // FMA: sumVec += va * vb (fused multiply-add)
-            sumVec = va.fma(vb, sumVec);
+            FloatVector va1 = FloatVector.fromArray(floatSpecies, a, i + speciesLength);
+            FloatVector vb1 = FloatVector.fromArray(floatSpecies, b, i + speciesLength);
+            sumVec1 = va1.fma(vb1, sumVec1);
         }
 
-        // Horizontal reduction: collapse SIMD lanes into a single scalar sum
-        float sum = sumVec.reduceLanes(VectorOperators.ADD);
+        // Phase 2: Single-vector SIMD loop for remainder kicking after dual loop.
+        int upperBound1 = floatSpecies.loopBound(a.length);
 
-        // Scalar tail for remaining elements
+        for (; i < upperBound1; i += speciesLength) {
+            FloatVector va = FloatVector.fromArray(floatSpecies, a, i);
+            FloatVector vb = FloatVector.fromArray(floatSpecies, b, i);
+            sumVec0 = va.fma(vb, sumVec0);
+        }
+
+        // Merge dual accumulators and horizontally reduce into a scalar sum
+        float sum = sumVec0.add(sumVec1).reduceLanes(VectorOperators.ADD);
+
+        // Phase 3: Scalar tail for remaining elements
         for (; i < a.length; i++)
             sum += a[i] * b[i];
 
@@ -132,42 +184,75 @@ class VectorAPI implements Metric {
      * {@inheritDoc}
      *
      * <p>Computes all three required accumulators (dot product, norm of a, norm of b)
-     * simultaneously in a single pass using three independent FMA accumulator vectors.
-     * This maximizes data locality by reading each element of {@code a} and {@code b}
-     * only once from memory.</p>
+     * simultaneously in a single pass. Each of the three quantities uses two independent
+     * accumulator vectors (6 total), maximizing FMA pipeline utilization.</p>
+     *
+     * <p>Dual accumulators saturate the FMA pipeline (2 FMA/cycle throughput vs 4-5 cycle
+     * latency). With 6 independent FMA streams (2 per quantity), the CPU can keep its
+     * FMA units busy across iterations. Processing 2 vector widths per iteration hides
+     * the reduction latency and ensures that the 6 FMA operations in each half-iteration
+     * are spread across the pipeline stages without stalling.</p>
      */
     @Override public float cosineDistance(float[] a, float[] b) {
-        // Three independent accumulator vectors for the dot product and squared norms
-        FloatVector dotVec = FloatVector.zero(floatSpecies);
-        FloatVector sumAVec = FloatVector.zero(floatSpecies);
-        FloatVector sumBVec = FloatVector.zero(floatSpecies);
+        MetricValidation.validateFloatArrays(a, b);
+        // Six independent accumulator vectors: two for each of the three quantities
+        // (dot product, squared norm of a, squared norm of b). This maximizes pipeline
+        // utilization by providing enough independent FMA chains to keep the execution
+        // units saturated despite the 4-5 cycle FMA latency.
+        FloatVector dotVec0 = FloatVector.zero(floatSpecies);
+        FloatVector dotVec1 = FloatVector.zero(floatSpecies);
+        FloatVector sumAVec0 = FloatVector.zero(floatSpecies);
+        FloatVector sumAVec1 = FloatVector.zero(floatSpecies);
+        FloatVector sumBVec0 = FloatVector.zero(floatSpecies);
+        FloatVector sumBVec1 = FloatVector.zero(floatSpecies);
 
-        int i = 0, bound = floatSpecies.loopBound(a.length);
+        int i = 0;
+        int speciesLength = floatSpecies.length();
+        int doubleStride = 2 * speciesLength;
 
-        // Main SIMD loop: accumulate dot(a,b), ||a||^2, and ||b||^2 in parallel
-        for (; i < bound; i += floatSpecies.length()) {
-            FloatVector va = FloatVector.fromArray(floatSpecies, a, i);
+        // Phase 1: Dual-vector SIMD loop -- accumulate dot(a,b), ||a||^2, and ||b||^2
+        // using two independent accumulators per quantity. Each iteration processes
+        // 2 * speciesLength elements and issues 6 FMA operations (3 per vector width).
+        int upperBound2 = a.length - doubleStride + 1;
 
-            FloatVector vb = FloatVector.fromArray(floatSpecies, b, i);
+        for (; i < upperBound2; i += doubleStride) {
+            // First vector width: feeds accumulators 0
+            FloatVector va0 = FloatVector.fromArray(floatSpecies, a, i);
+            FloatVector vb0 = FloatVector.fromArray(floatSpecies, b, i);
+            dotVec0 = va0.fma(vb0, dotVec0);
+            sumAVec0 = va0.fma(va0, sumAVec0);
+            sumBVec0 = vb0.fma(vb0, sumBVec0);
 
-            dotVec = va.fma(vb, dotVec);    // dotVec += va * vb
-
-            sumAVec = va.fma(va, sumAVec);  // sumAVec += va * va (squared norm of a)
-
-            sumBVec = vb.fma(vb, sumBVec);  // sumBVec += vb * vb (squared norm of b)
+            // Second vector width: feeds accumulators 1, independent from accumulators 0
+            FloatVector va1 = FloatVector.fromArray(floatSpecies, a, i + speciesLength);
+            FloatVector vb1 = FloatVector.fromArray(floatSpecies, b, i + speciesLength);
+            dotVec1 = va1.fma(vb1, dotVec1);
+            sumAVec1 = va1.fma(va1, sumAVec1);
+            sumBVec1 = vb1.fma(vb1, sumBVec1);
         }
 
-        // Horizontal reduction of all three accumulator vectors
-        float dot = dotVec.reduceLanes(VectorOperators.ADD);
-        float sumA = sumAVec.reduceLanes(VectorOperators.ADD);
-        float sumB = sumBVec.reduceLanes(VectorOperators.ADD);
+        // Phase 2: Single-vector SIMD loop -- handle remainder that fits one full
+        // vector width but not two. Only feeds accumulators 0 since there's no
+        // second chunk to pipeline against.
+        int upperBound1 = floatSpecies.loopBound(a.length);
 
-        // Scalar tail for remaining elements
+        for (; i < upperBound1; i += speciesLength) {
+            FloatVector va = FloatVector.fromArray(floatSpecies, a, i);
+            FloatVector vb = FloatVector.fromArray(floatSpecies, b, i);
+            dotVec0 = va.fma(vb, dotVec0);
+            sumAVec0 = va.fma(va, sumAVec0);
+            sumBVec0 = vb.fma(vb, sumBVec0);
+        }
+
+        // Merge the paired accumulators and horizontally reduce all lanes to scalars
+        float dot = dotVec0.add(dotVec1).reduceLanes(VectorOperators.ADD);
+        float sumA = sumAVec0.add(sumAVec1).reduceLanes(VectorOperators.ADD);
+        float sumB = sumBVec0.add(sumBVec1).reduceLanes(VectorOperators.ADD);
+
+        // Phase 3: Scalar tail for remaining elements
         for (; i < a.length; i++) {
             dot += a[i] * b[i];
-
             sumA += a[i] * a[i];
-
             sumB += b[i] * b[i];
         }
 
@@ -192,6 +277,7 @@ class VectorAPI implements Metric {
      * popcount calls by a factor of 8 compared to per-byte processing.</p>
      */
     @Override public long hammingDistanceB8(byte[] a, byte[] b) {
+        MetricValidation.validateByteArrays(a, b);
         long distance = 0;
 
         int index = 0;
@@ -224,6 +310,159 @@ class VectorAPI implements Metric {
         }
 
         return distance;
+    }
+
+    // ======================== Offset-based methods for flat array layout ========================
+    // Dual accumulators match the optimization in the non-offset methods, ensuring the
+    // hot-path scan loop in IVFIndexFlat benefits from full FMA pipeline saturation.
+
+    /** {@inheritDoc} */
+    @Override public float l2Distance(float[] a, float[] b, int bOffset, int length) {
+        // Dual accumulator vectors for FMA pipeline saturation
+        FloatVector sumVec0 = FloatVector.zero(floatSpecies);
+        FloatVector sumVec1 = FloatVector.zero(floatSpecies);
+
+        int index = 0;
+        int speciesLength = floatSpecies.length();
+        int doubleStride = 2 * speciesLength;
+
+        // Phase 1: Dual-vector SIMD loop -- process 2 full vector widths per iteration
+        int upperBound2 = length - doubleStride + 1;
+
+        for (; index < upperBound2; index += doubleStride) {
+            FloatVector vectorA0 = FloatVector.fromArray(floatSpecies, a, index);
+            FloatVector vectorB0 = FloatVector.fromArray(floatSpecies, b, bOffset + index);
+            FloatVector vectorDiff0 = vectorA0.sub(vectorB0);
+            sumVec0 = vectorDiff0.fma(vectorDiff0, sumVec0);
+
+            FloatVector vectorA1 = FloatVector.fromArray(floatSpecies, a, index + speciesLength);
+            FloatVector vectorB1 = FloatVector.fromArray(floatSpecies, b, bOffset + index + speciesLength);
+            FloatVector vectorDiff1 = vectorA1.sub(vectorB1);
+            sumVec1 = vectorDiff1.fma(vectorDiff1, sumVec1);
+        }
+
+        // Phase 2: Single-vector SIMD loop for remainder that fits one full vector width
+        int upperBound1 = floatSpecies.loopBound(length);
+
+        for (; index < upperBound1; index += speciesLength) {
+            FloatVector vectorA = FloatVector.fromArray(floatSpecies, a, index);
+            FloatVector vectorB = FloatVector.fromArray(floatSpecies, b, bOffset + index);
+            FloatVector vectorDiff = vectorA.sub(vectorB);
+            sumVec0 = vectorDiff.fma(vectorDiff, sumVec0);
+        }
+
+        // Merge the two accumulators and horizontally reduce all lanes into a scalar
+        float sumSquares = sumVec0.add(sumVec1).reduceLanes(VectorOperators.ADD);
+
+        // Phase 3: Scalar tail for remaining elements
+        for (; index < length; index++) {
+            float diff = a[index] - b[bOffset + index];
+            sumSquares += diff * diff;
+        }
+        return sumSquares;
+    }
+
+    /** {@inheritDoc} */
+    @Override public float dotProduct(float[] a, float[] b, int bOffset, int length) {
+        // Dual accumulator vectors for FMA pipeline saturation
+        FloatVector sumVec0 = FloatVector.zero(floatSpecies);
+        FloatVector sumVec1 = FloatVector.zero(floatSpecies);
+
+        int i = 0;
+        int speciesLength = floatSpecies.length();
+        int doubleStride = 2 * speciesLength;
+
+        // Phase 1: Dual-vector SIMD loop -- FMA accumulates a[i]*b[bOffset+i] into two
+        // independent accumulators, processing 2 vector widths per iteration
+        int upperBound2 = length - doubleStride + 1;
+
+        for (; i < upperBound2; i += doubleStride) {
+            FloatVector va0 = FloatVector.fromArray(floatSpecies, a, i);
+            FloatVector vb0 = FloatVector.fromArray(floatSpecies, b, bOffset + i);
+            sumVec0 = va0.fma(vb0, sumVec0);
+
+            FloatVector va1 = FloatVector.fromArray(floatSpecies, a, i + speciesLength);
+            FloatVector vb1 = FloatVector.fromArray(floatSpecies, b, bOffset + i + speciesLength);
+            sumVec1 = va1.fma(vb1, sumVec1);
+        }
+
+        // Phase 2: Single-vector SIMD loop for remainder
+        int upperBound1 = floatSpecies.loopBound(length);
+
+        for (; i < upperBound1; i += speciesLength) {
+            FloatVector va = FloatVector.fromArray(floatSpecies, a, i);
+            FloatVector vb = FloatVector.fromArray(floatSpecies, b, bOffset + i);
+            sumVec0 = va.fma(vb, sumVec0);
+        }
+
+        // Merge dual accumulators and horizontally reduce into a scalar sum
+        float sum = sumVec0.add(sumVec1).reduceLanes(VectorOperators.ADD);
+
+        // Phase 3: Scalar tail for remaining elements
+        for (; i < length; i++)
+            sum += a[i] * b[bOffset + i];
+        return sum;
+    }
+
+    /** {@inheritDoc} */
+    @Override public float cosineDistance(float[] a, float[] b, int bOffset, int length) {
+        // Six independent accumulator vectors: two for each of the three quantities
+        // (dot product, squared norm of a, squared norm of b)
+        FloatVector dotVec0 = FloatVector.zero(floatSpecies);
+        FloatVector dotVec1 = FloatVector.zero(floatSpecies);
+        FloatVector sumAVec0 = FloatVector.zero(floatSpecies);
+        FloatVector sumAVec1 = FloatVector.zero(floatSpecies);
+        FloatVector sumBVec0 = FloatVector.zero(floatSpecies);
+        FloatVector sumBVec1 = FloatVector.zero(floatSpecies);
+
+        int i = 0;
+        int speciesLength = floatSpecies.length();
+        int doubleStride = 2 * speciesLength;
+
+        // Phase 1: Dual-vector SIMD loop -- accumulate dot(a,b), ||a||^2, and ||b||^2
+        // using two independent accumulators per quantity
+        int upperBound2 = length - doubleStride + 1;
+
+        for (; i < upperBound2; i += doubleStride) {
+            // First vector width: feeds accumulators 0
+            FloatVector va0 = FloatVector.fromArray(floatSpecies, a, i);
+            FloatVector vb0 = FloatVector.fromArray(floatSpecies, b, bOffset + i);
+            dotVec0 = va0.fma(vb0, dotVec0);
+            sumAVec0 = va0.fma(va0, sumAVec0);
+            sumBVec0 = vb0.fma(vb0, sumBVec0);
+
+            // Second vector width: feeds accumulators 1, independent from accumulators 0
+            FloatVector va1 = FloatVector.fromArray(floatSpecies, a, i + speciesLength);
+            FloatVector vb1 = FloatVector.fromArray(floatSpecies, b, bOffset + i + speciesLength);
+            dotVec1 = va1.fma(vb1, dotVec1);
+            sumAVec1 = va1.fma(va1, sumAVec1);
+            sumBVec1 = vb1.fma(vb1, sumBVec1);
+        }
+
+        // Phase 2: Single-vector SIMD loop for remainder that fits one full vector width
+        int upperBound1 = floatSpecies.loopBound(length);
+
+        for (; i < upperBound1; i += speciesLength) {
+            FloatVector va = FloatVector.fromArray(floatSpecies, a, i);
+            FloatVector vb = FloatVector.fromArray(floatSpecies, b, bOffset + i);
+            dotVec0 = va.fma(vb, dotVec0);
+            sumAVec0 = va.fma(va, sumAVec0);
+            sumBVec0 = vb.fma(vb, sumBVec0);
+        }
+
+        // Merge the paired accumulators and horizontally reduce all lanes to scalars
+        float dot = dotVec0.add(dotVec1).reduceLanes(VectorOperators.ADD);
+        float sumA = sumAVec0.add(sumAVec1).reduceLanes(VectorOperators.ADD);
+        float sumB = sumBVec0.add(sumBVec1).reduceLanes(VectorOperators.ADD);
+
+        // Phase 3: Scalar tail for remaining elements
+        for (; i < length; i++) {
+            float bi = b[bOffset + i];
+            dot += a[i] * bi;
+            sumA += a[i] * a[i];
+            sumB += bi * bi;
+        }
+        return 1 - (float)(dot / Math.sqrt((double) sumA * sumB));
     }
 
 }

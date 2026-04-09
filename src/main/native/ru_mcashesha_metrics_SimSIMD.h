@@ -9,34 +9,34 @@ extern "C" {
 #endif
 /*
  * Class:     ru_mcashesha_metrics_SimSIMD
- * Method:    l2Distance
+ * Method:    l2DistanceNative
  * Signature: ([F[F)F
  */
-JNIEXPORT jfloat JNICALL Java_ru_mcashesha_metrics_SimSIMD_l2Distance
+JNIEXPORT jfloat JNICALL Java_ru_mcashesha_metrics_SimSIMD_l2DistanceNative
   (JNIEnv *, jclass, jfloatArray, jfloatArray);
 
 /*
  * Class:     ru_mcashesha_metrics_SimSIMD
- * Method:    dotProduct
+ * Method:    dotProductNative
  * Signature: ([F[F)F
  */
-JNIEXPORT jfloat JNICALL Java_ru_mcashesha_metrics_SimSIMD_dotProduct
+JNIEXPORT jfloat JNICALL Java_ru_mcashesha_metrics_SimSIMD_dotProductNative
   (JNIEnv *, jclass, jfloatArray, jfloatArray);
 
 /*
  * Class:     ru_mcashesha_metrics_SimSIMD
- * Method:    cosineDistance
+ * Method:    cosineDistanceNative
  * Signature: ([F[F)F
  */
-JNIEXPORT jfloat JNICALL Java_ru_mcashesha_metrics_SimSIMD_cosineDistance
+JNIEXPORT jfloat JNICALL Java_ru_mcashesha_metrics_SimSIMD_cosineDistanceNative
   (JNIEnv *, jclass, jfloatArray, jfloatArray);
 
 /*
  * Class:     ru_mcashesha_metrics_SimSIMD
- * Method:    hammingDistanceB8
+ * Method:    hammingDistanceB8Native
  * Signature: ([B[B)J
  */
-JNIEXPORT jlong JNICALL Java_ru_mcashesha_metrics_SimSIMD_hammingDistanceB8
+JNIEXPORT jlong JNICALL Java_ru_mcashesha_metrics_SimSIMD_hammingDistanceB8Native
   (JNIEnv *, jclass, jbyteArray, jbyteArray);
 
 #ifdef __cplusplus

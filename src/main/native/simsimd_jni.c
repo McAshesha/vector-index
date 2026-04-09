@@ -5,10 +5,14 @@
  *        computations.
  *
  * This file implements four native methods declared in the SimSIMD Java class:
- *   - l2Distance      -- squared Euclidean (L2^2) distance between float vectors
- *   - dotProduct      -- inner (dot) product between float vectors
- *   - cosineDistance   -- cosine distance (1 - cosine similarity) between float vectors
- *   - hammingDistanceB8 -- bitwise Hamming distance between byte-packed binary vectors
+ *   - l2DistanceNative      -- squared Euclidean (L2^2) distance between float vectors
+ *   - dotProductNative      -- inner (dot) product between float vectors
+ *   - cosineDistanceNative  -- cosine distance (1 - cosine similarity) between float vectors
+ *   - hammingDistanceB8Native -- bitwise Hamming distance between byte-packed binary vectors
+ *
+ * SECURITY: Each function validates that both input arrays have equal length
+ * before accessing memory. Mismatched lengths throw IllegalArgumentException.
+ * The minimum of both lengths is used as defense-in-depth.
  *
  * All functions follow the same JNI critical-section pattern for zero-copy
  * array access:
@@ -61,7 +65,7 @@
  * @return The squared L2 distance, or 0.0f on allocation failure.
  */
 JNIEXPORT jfloat JNICALL
-Java_ru_mcashesha_metrics_SimSIMD_l2Distance(
+Java_ru_mcashesha_metrics_SimSIMD_l2DistanceNative(
     JNIEnv *env,
     jclass clazz,
     jfloatArray a,
@@ -72,7 +76,26 @@ Java_ru_mcashesha_metrics_SimSIMD_l2Distance(
      * need it. */
     (void) clazz;
 
-    jsize len = (*env)->GetArrayLength(env, a);
+    /* Retrieve the lengths of both input arrays independently.
+     * SECURITY FIX: Previously only the length of array 'a' was read,
+     * which meant that if 'b' was shorter, SimSIMD would read past the
+     * end of 'b's allocated memory -- a buffer over-read vulnerability. */
+    jsize lenA = (*env)->GetArrayLength(env, a);
+    jsize lenB = (*env)->GetArrayLength(env, b);
+
+    /* Validate that both arrays have the same length. Mismatched lengths
+     * indicate a programming error and would lead to out-of-bounds access. */
+    if (lenA != lenB)
+    {
+        (*env)->ThrowNew(
+            env,
+            (*env)->FindClass(env, "java/lang/IllegalArgumentException"),
+            "array lengths must be equal");
+        return 0.0f;
+    }
+
+    /* Defense-in-depth: use minimum length even though equality is enforced. */
+    jsize len = lenA < lenB ? lenA : lenB;
 
     /* --- Begin critical section: GC is effectively paused here. --- */
     jfloat *ptrA = (*env)->GetPrimitiveArrayCritical(env, a, NULL);
@@ -130,15 +153,28 @@ Java_ru_mcashesha_metrics_SimSIMD_l2Distance(
  * @return The dot product, or 0.0f on allocation failure.
  */
 JNIEXPORT jfloat JNICALL
-Java_ru_mcashesha_metrics_SimSIMD_dotProduct(
+Java_ru_mcashesha_metrics_SimSIMD_dotProductNative(
     JNIEnv *env,
     jclass clazz,
     jfloatArray a,
     jfloatArray b)
 {
-    (void) clazz; /* Unused -- see l2Distance comment. */
+    (void) clazz;
 
-    jsize len = (*env)->GetArrayLength(env, a);
+    /* Length validation -- see l2DistanceNative for detailed security rationale. */
+    jsize lenA = (*env)->GetArrayLength(env, a);
+    jsize lenB = (*env)->GetArrayLength(env, b);
+
+    if (lenA != lenB)
+    {
+        (*env)->ThrowNew(
+            env,
+            (*env)->FindClass(env, "java/lang/IllegalArgumentException"),
+            "array lengths must be equal");
+        return 0.0f;
+    }
+
+    jsize len = lenA < lenB ? lenA : lenB;
 
     /* --- Begin critical section --- */
     jfloat *ptrA = (*env)->GetPrimitiveArrayCritical(env, a, NULL);
@@ -189,15 +225,28 @@ Java_ru_mcashesha_metrics_SimSIMD_dotProduct(
  * @return The cosine distance (1 - cosine similarity), or 0.0f on failure.
  */
 JNIEXPORT jfloat JNICALL
-Java_ru_mcashesha_metrics_SimSIMD_cosineDistance(
+Java_ru_mcashesha_metrics_SimSIMD_cosineDistanceNative(
     JNIEnv *env,
     jclass clazz,
     jfloatArray a,
     jfloatArray b)
 {
-    (void) clazz; /* Unused -- see l2Distance comment. */
+    (void) clazz;
 
-    jsize len = (*env)->GetArrayLength(env, a);
+    /* Length validation -- see l2DistanceNative for detailed security rationale. */
+    jsize lenA = (*env)->GetArrayLength(env, a);
+    jsize lenB = (*env)->GetArrayLength(env, b);
+
+    if (lenA != lenB)
+    {
+        (*env)->ThrowNew(
+            env,
+            (*env)->FindClass(env, "java/lang/IllegalArgumentException"),
+            "array lengths must be equal");
+        return 0.0f;
+    }
+
+    jsize len = lenA < lenB ? lenA : lenB;
 
     /* --- Begin critical section --- */
     jfloat *ptrA = (*env)->GetPrimitiveArrayCritical(env, a, NULL);
@@ -249,15 +298,28 @@ Java_ru_mcashesha_metrics_SimSIMD_cosineDistance(
  * @return The Hamming distance (number of differing bits), or 0 on failure.
  */
 JNIEXPORT jlong JNICALL
-Java_ru_mcashesha_metrics_SimSIMD_hammingDistanceB8(
+Java_ru_mcashesha_metrics_SimSIMD_hammingDistanceB8Native(
     JNIEnv *env,
     jclass clazz,
     jbyteArray a,
     jbyteArray b)
 {
-    (void) clazz; /* Unused -- see l2Distance comment. */
+    (void) clazz;
 
-    jsize len = (*env)->GetArrayLength(env, a);
+    /* Length validation -- see l2DistanceNative for detailed security rationale. */
+    jsize lenA = (*env)->GetArrayLength(env, a);
+    jsize lenB = (*env)->GetArrayLength(env, b);
+
+    if (lenA != lenB)
+    {
+        (*env)->ThrowNew(
+            env,
+            (*env)->FindClass(env, "java/lang/IllegalArgumentException"),
+            "array lengths must be equal");
+        return 0L;
+    }
+
+    jsize len = lenA < lenB ? lenA : lenB;
 
     /* --- Begin critical section --- */
     jbyte *ptrA = (*env)->GetPrimitiveArrayCritical(env, a, NULL);

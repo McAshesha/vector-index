@@ -2,6 +2,7 @@ package ru.mcashesha.kmeans;
 
 import java.util.Arrays;
 import java.util.Random;
+import java.util.logging.Logger;
 import java.util.stream.IntStream;
 import ru.mcashesha.metrics.Metric;
 
@@ -38,6 +39,7 @@ import ru.mcashesha.metrics.Metric;
  * @see KMeansUtils#initializeCentroidsKMeansPlusPlus
  */
 class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
+    private static final Logger LOGGER = Logger.getLogger(MiniBatchKMeans.class.getName());
 
     /** Number of clusters (k) to produce. */
     private final int clusterCnt;
@@ -142,6 +144,11 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
             );
         }
 
+        if (metricType == Metric.Type.DOT_PRODUCT) {
+            LOGGER.warning("DOT_PRODUCT metric assumes normalized input vectors. "
+                + "Consider COSINE_DISTANCE for unnormalized data.");
+        }
+
         Metric.DistanceFunction distFn = metricType.resolveFunction(metricEngine);
 
         // Step 1: KMeans++ initialization
@@ -163,6 +170,12 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
         // Per-batch accumulators for centroid sums and counts
         float[][] batchSums = new float[clusterCnt][dimension];
         int[] batchClusterCounts = new int[clusterCnt];
+
+        // Pre-allocated thread-local buffers avoid per-iteration allocation of O(threads * k * d) memory.
+        int numThreads = Runtime.getRuntime().availableProcessors();
+        float[][][] preallocLocalSums = new float[numThreads][clusterCnt][dimension];
+        int[][] preallocLocalCounts = new int[numThreads][clusterCnt];
+        double[] preallocLocalLoss = new double[numThreads];
 
         // Initialize sample pool for Fisher-Yates partial shuffle.
         // The pool contains all indices [0, sampleCnt) and is partially shuffled
@@ -208,7 +221,8 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
 
             // Assign batch points to nearest centroids and accumulate per-cluster sums
             float batchLossSum = assignMiniBatch(data, centroids, batchIndices, batchSums,
-                batchClusterCounts, dimension, distFn);
+                batchClusterCounts, dimension, distFn,
+                preallocLocalSums, preallocLocalCounts, preallocLocalLoss);
             float averageBatchLoss = batchLossSum / actualBatchSize;
 
             // Weighted centroid update using cumulative counts
@@ -323,6 +337,9 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
      * @param batchClusterCounts output: per-cluster point counts from this batch
      * @param dimension          the dimensionality of data points
      * @param distFn             the distance function
+     * @param preallocLocalSums  pre-allocated thread-local sum buffers for parallel path
+     * @param preallocLocalCounts pre-allocated thread-local count buffers for parallel path
+     * @param preallocLocalLoss  pre-allocated thread-local loss buffers for parallel path
      * @return the total batch loss (sum of distances from each batch point to its nearest centroid)
      */
     private float assignMiniBatch(float[][] data,
@@ -331,16 +348,22 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
         float[][] batchSums,
         int[] batchClusterCounts,
         int dimension,
-        Metric.DistanceFunction distFn) {
+        Metric.DistanceFunction distFn,
+        float[][][] preallocLocalSums,
+        int[][] preallocLocalCounts,
+        double[] preallocLocalLoss) {
 
         int batchLen = batchIndices.length;
 
         if (batchLen >= PARALLEL_BATCH_THRESHOLD) {
-            return assignMiniBatchParallel(data, centroids, batchIndices, batchSums, batchClusterCounts, dimension, distFn);
+            return assignMiniBatchParallel(data, centroids, batchIndices, batchSums, batchClusterCounts, dimension, distFn,
+                preallocLocalSums, preallocLocalCounts, preallocLocalLoss);
         }
 
         // Sequential path for small batches
-        float batchLoss = 0.0f;
+        // Use double accumulation to prevent precision loss over many summands
+        // (float has ~7 significant digits, which degrades after >100K additions).
+        double batchLoss = 0.0;
 
         for (int sampleIdx : batchIndices) {
             float[] point = data[sampleIdx];
@@ -367,7 +390,7 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
             batchClusterCounts[nearestClusterIdx]++;
         }
 
-        return batchLoss;
+        return (float) batchLoss;
     }
 
     /**
@@ -384,6 +407,9 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
      * @param batchClusterCounts output: per-cluster point counts from this batch
      * @param dimension          the dimensionality of data points
      * @param distFn             the distance function
+     * @param preallocLocalSums  pre-allocated thread-local sum buffers (zeroed before use)
+     * @param preallocLocalCounts pre-allocated thread-local count buffers (zeroed before use)
+     * @param preallocLocalLoss  pre-allocated thread-local loss buffers (zeroed before use)
      * @return the total batch loss
      */
     private float assignMiniBatchParallel(float[][] data,
@@ -392,16 +418,30 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
         float[][] batchSums,
         int[] batchClusterCounts,
         int dimension,
-        Metric.DistanceFunction distFn) {
+        Metric.DistanceFunction distFn,
+        float[][][] preallocLocalSums,
+        int[][] preallocLocalCounts,
+        double[] preallocLocalLoss) {
 
         int batchLen = batchIndices.length;
-        int numThreads = Math.min(Runtime.getRuntime().availableProcessors(), batchLen);
+        int numThreads = Math.min(preallocLocalSums.length, batchLen);
         int chunkSize = (batchLen + numThreads - 1) / numThreads;
 
-        // Thread-local accumulators: each thread writes to its own arrays
-        float[][][] localSums = new float[numThreads][clusterCnt][dimension];
-        int[][] localCounts = new int[numThreads][clusterCnt];
-        float[] localLoss = new float[numThreads];
+        // Zero pre-allocated thread-local buffers before use
+        for (int t = 0; t < numThreads; t++) {
+            for (int c = 0; c < clusterCnt; c++) {
+                Arrays.fill(preallocLocalSums[t][c], 0.0f);
+            }
+            Arrays.fill(preallocLocalCounts[t], 0);
+            preallocLocalLoss[t] = 0.0;
+        }
+
+        // Thread-local accumulators: reuse pre-allocated arrays instead of allocating per iteration.
+        // Use double accumulation to prevent precision loss over many summands
+        // (float has ~7 significant digits, which degrades after >100K additions).
+        float[][][] localSums = preallocLocalSums;
+        int[][] localCounts = preallocLocalCounts;
+        double[] localLoss = preallocLocalLoss;
 
         // Parallel assignment: each thread processes its chunk independently
         IntStream.range(0, numThreads).parallel().forEach(threadIdx -> {
@@ -410,7 +450,7 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
 
             float[][] mySums = localSums[threadIdx];
             int[] myCounts = localCounts[threadIdx];
-            float myLoss = 0f;
+            double myLoss = 0.0;
 
             for (int b = start; b < end; b++) {
                 int sampleIdx = batchIndices[b];
@@ -439,7 +479,7 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
         });
 
         // Merge thread-local results into shared output arrays
-        float totalLoss = 0f;
+        double totalLoss = 0.0;
         for (int t = 0; t < numThreads; t++) {
             totalLoss += localLoss[t];
 
@@ -453,7 +493,7 @@ class MiniBatchKMeans implements KMeans<MiniBatchKMeans.Result> {
             }
         }
 
-        return totalLoss;
+        return (float) totalLoss;
     }
 
     /**

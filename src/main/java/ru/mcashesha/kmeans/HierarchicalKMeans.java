@@ -65,6 +65,8 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
     private final Metric.Engine metricEngine;
     /** Random number generator for KMeans++ initialization at each level. */
     private final Random random;
+    /** Beam width for prediction tree traversal. 1 = greedy (default), >1 = beam search. */
+    private final int beamWidth;
 
     /**
      * Constructs a HierarchicalKMeans instance with the specified configuration.
@@ -87,6 +89,34 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
         Random random,
         Metric.Type metricType,
         Metric.Engine metricEngine) {
+        this(branchFactor, maxDepth, minClusterSize, maxIterationsPerLevel,
+            tolerance, random, metricType, metricEngine, 1);
+    }
+
+    /**
+     * Constructs a HierarchicalKMeans instance with the specified configuration
+     * including beam search width for prediction.
+     *
+     * @param branchFactor         the number of children per internal node; must be >= 2
+     * @param maxDepth             the maximum tree depth; must be positive
+     * @param minClusterSize       the minimum points for a non-leaf node; must be positive
+     * @param maxIterationsPerLevel the max Lloyd iterations per level; must be positive
+     * @param tolerance            the convergence tolerance; must be non-negative
+     * @param random               the RNG; must not be null
+     * @param metricType           the distance metric; must not be null
+     * @param metricEngine         the computation engine; must not be null
+     * @param beamWidth            the beam width for prediction; 1 = greedy, >1 = beam search
+     * @throws IllegalArgumentException if any argument violates its constraints
+     */
+    public HierarchicalKMeans(int branchFactor,
+        int maxDepth,
+        int minClusterSize,
+        int maxIterationsPerLevel,
+        float tolerance,
+        Random random,
+        Metric.Type metricType,
+        Metric.Engine metricEngine,
+        int beamWidth) {
 
         if (branchFactor <= 1)
             throw new IllegalArgumentException("branchFactor must be >= 2");
@@ -102,6 +132,8 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
             throw new IllegalArgumentException("metricType and metricEngine must be non-null");
         if (random == null)
             throw new IllegalArgumentException("random must be non-null");
+        if (beamWidth <= 0)
+            throw new IllegalArgumentException("beamWidth must be > 0");
 
         this.branchFactor = branchFactor;
         this.maxDepth = maxDepth;
@@ -111,6 +143,7 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
         this.random = random;
         this.metricType = metricType;
         this.metricEngine = metricEngine;
+        this.beamWidth = beamWidth;
     }
 
     @Override public Metric.Type getMetricType() {
@@ -153,19 +186,20 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
         }
 
         // Recursively build the clustering tree starting at the root (level 0)
-        Node root = buildNode(data, allIndices, 0, dimension);
+        Node root = buildNode(data, allIndices, 0, dimension, random);
 
         // Collect leaf centroids and assign leaf IDs via depth-first traversal
         List<float[]> leafCentroidsList = new ArrayList<>();
         int[] leafAssignments = new int[sampleCnt];
-        FloatWrapper lossAccumulator = new FloatWrapper();
+        // Use double accumulation to prevent precision loss over many summands
+        DoubleWrapper lossAccumulator = new DoubleWrapper();
 
         assignLeafIdsAndCollect(root, data, leafCentroidsList, leafAssignments, lossAccumulator, distFn);
 
         float[][] leafCentroids = leafCentroidsList.toArray(new float[0][]);
         int[] clusterSizes = computeClusterSizes(leafAssignments, leafCentroids.length);
 
-        return new Result(root, leafAssignments, leafCentroids, lossAccumulator.val, clusterSizes);
+        return new Result(root, leafAssignments, leafCentroids, (float) lossAccumulator.val, clusterSizes);
     }
 
     /**
@@ -203,12 +237,22 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
         if (data.length >= PARALLEL_PREDICT_THRESHOLD) {
             // Parallel prediction: each point's tree traversal is independent
             Node root = model.getRoot();
-            IntStream.range(0, data.length).parallel().forEach(i ->
-                labels[i] = predictSinglePoint(data[i], root, distFn));
+            if (beamWidth > 1) {
+                IntStream.range(0, data.length).parallel().forEach(i ->
+                    labels[i] = predictSinglePointBeam(data[i], root, distFn, beamWidth));
+            } else {
+                IntStream.range(0, data.length).parallel().forEach(i ->
+                    labels[i] = predictSinglePoint(data[i], root, distFn));
+            }
         } else {
             // Sequential path for small datasets
-            for (int i = 0; i < data.length; i++)
-                labels[i] = predictSinglePoint(data[i], model.getRoot(), distFn);
+            if (beamWidth > 1) {
+                for (int i = 0; i < data.length; i++)
+                    labels[i] = predictSinglePointBeam(data[i], model.getRoot(), distFn, beamWidth);
+            } else {
+                for (int i = 0; i < data.length; i++)
+                    labels[i] = predictSinglePoint(data[i], model.getRoot(), distFn);
+            }
         }
 
         return labels;
@@ -254,6 +298,69 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
     }
 
     /**
+     * Traverses the clustering tree using beam search to find the best leaf node
+     * for a single query point.
+     *
+     * <p>Instead of greedily picking the single nearest child at each level (which
+     * is susceptible to boundary effects), beam search maintains the top
+     * {@code beamWidth} candidate nodes at each tree level. At each step, all
+     * children of all current candidates are collected, sorted by distance to the
+     * query point, and the top {@code beamWidth} are kept. This continues until
+     * all candidates are leaves, at which point the nearest leaf is returned.</p>
+     *
+     * @param point     the query point
+     * @param node      the root node to start traversal from
+     * @param distFn    the distance function
+     * @param beamWidth the number of candidates to retain at each level
+     * @return the leaf ID of the best-matching terminal node
+     * @throws IllegalStateException if a leaf node has no assigned leaf ID
+     */
+    private int predictSinglePointBeam(float[] point, Node node,
+        Metric.DistanceFunction distFn, int beamWidth) {
+        List<Node> candidates = new ArrayList<>();
+        candidates.add(node);
+
+        while (!candidates.isEmpty()) {
+            // Expand all candidates: collect their children
+            List<Node> nextCandidates = new ArrayList<>();
+            boolean allLeaves = true;
+
+            for (Node cand : candidates) {
+                if (cand.isLeaf()) {
+                    nextCandidates.add(cand); // keep leaves
+                } else {
+                    allLeaves = false;
+                    for (Node child : cand.getChildren())
+                        nextCandidates.add(child);
+                }
+            }
+
+            if (allLeaves)
+                break;
+
+            // Sort by distance to point, keep top beamWidth
+            nextCandidates.sort((a, b) -> Float.compare(
+                distFn.compute(point, a.getCentroid()),
+                distFn.compute(point, b.getCentroid())));
+            candidates = nextCandidates.subList(0, Math.min(beamWidth, nextCandidates.size()));
+        }
+
+        // Among final candidates (all leaves), pick nearest
+        Node best = candidates.get(0);
+        float bestDist = distFn.compute(point, best.getCentroid());
+
+        for (int i = 1; i < candidates.size(); i++) {
+            float d = distFn.compute(point, candidates.get(i).getCentroid());
+            if (d < bestDist) {
+                bestDist = d;
+                best = candidates.get(i);
+            }
+        }
+
+        return best.getLeafId();
+    }
+
+    /**
      * Recursively builds a tree node for the given data subset.
      *
      * <p>If the stopping condition is met (max depth reached or too few points),
@@ -268,12 +375,14 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
      * @param indices   indices of data points belonging to this node
      * @param level     current depth in the tree (0 = root)
      * @param dimension the dimensionality of data points
+     * @param random    the RNG for this subtree; parallel children receive independent instances
      * @return the constructed node (internal or leaf)
      */
     private Node buildNode(float[][] data,
         int[] indices,
         int level,
-        int dimension) {
+        int dimension,
+        Random random) {
         int sampleCnt = indices.length;
 
         // Compute the centroid of this node's data subset
@@ -288,18 +397,8 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
         if (locClusterCnt < 2)
             return new Node(level, centroid, null, indices);
 
-        // Extract the subset of data referenced by this node's indices.
-        // This creates a contiguous view for Lloyd's KMeans to operate on.
-        float[][] subset = new float[sampleCnt][];
-        if (sampleCnt >= PARALLEL_CENTROID_THRESHOLD) {
-            IntStream.range(0, sampleCnt).parallel().forEach(i ->
-                subset[i] = data[indices[i]]);
-        } else {
-            for (int i = 0; i < sampleCnt; i++)
-                subset[i] = data[indices[i]];
-        }
-
-        // Run Lloyd's KMeans on this node's subset to partition into branchFactor clusters
+        // Run Lloyd's KMeans on this node's subset to partition into branchFactor clusters.
+        // The index-based overload creates a lightweight reference view internally.
         LloydKMeans kmeans = new LloydKMeans(
             locClusterCnt,
             metricType,
@@ -309,7 +408,7 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
             random
         );
 
-        LloydKMeans.Result kmResult = kmeans.fit(subset);
+        LloydKMeans.Result kmResult = kmeans.fit(data, indices);
         int[] labels = kmResult.getClusterAssignments();
 
         // Count points per cluster to identify non-empty clusters
@@ -380,16 +479,25 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
 
         // Recursively build child nodes.
         // Children at the same level are independent subtrees and can be built in parallel.
+        // Each child subtree gets its own Random seeded from the parent's RNG.
+        // Seeds are pre-generated sequentially to preserve determinism, then each child
+        // uses its independent RNG to avoid contention on java.util.Random's internal AtomicLong.
         Node[] children = new Node[nonEmptyClusterCnt];
         if (nonEmptyClusterCnt >= 2 && level < maxDepth - 2) {
+            // Pre-generate seeds sequentially from the parent RNG to preserve determinism
+            long[] childSeeds = new long[nonEmptyClusterCnt];
+            for (int i = 0; i < nonEmptyClusterCnt; i++)
+                childSeeds[i] = random.nextLong();
+
             // Parallel recursive building for non-trivial subtrees
             int[][] finalChildIndices = childIndices;
             IntStream.range(0, nonEmptyClusterCnt).parallel().forEach(i ->
-                children[i] = buildNode(data, finalChildIndices[i], level + 1, dimension));
+                children[i] = buildNode(data, finalChildIndices[i], level + 1, dimension,
+                    new Random(childSeeds[i])));
         } else {
             // Sequential for small number of children or near-leaf level
             for (int i = 0; i < nonEmptyClusterCnt; i++)
-                children[i] = buildNode(data, childIndices[i], level + 1, dimension);
+                children[i] = buildNode(data, childIndices[i], level + 1, dimension, random);
         }
 
         return new Node(level, centroid, children, null);
@@ -489,7 +597,7 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
         float[][] data,
         List<float[]> leafCentroidsList,
         int[] leafAssignments,
-        FloatWrapper lossAccumulator,
+        DoubleWrapper lossAccumulator,
         Metric.DistanceFunction distFn) {
         if (node == null)
             return;
@@ -562,9 +670,9 @@ class HierarchicalKMeans implements KMeans<HierarchicalKMeans.Result> {
      * Avoids boxing overhead that would result from using {@code AtomicReference<Float>}
      * or similar constructs in the sequential depth-first traversal.
      */
-    private static final class FloatWrapper {
-        /** The accumulated value. */
-        float val;
+    private static final class DoubleWrapper {
+        /** The accumulated value. Uses double to prevent precision loss over many summands. */
+        double val;
     }
 
     /**

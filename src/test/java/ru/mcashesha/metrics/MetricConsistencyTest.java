@@ -50,22 +50,18 @@ class MetricConsistencyTest {
     /** Fixed random seed for deterministic vector generation across all test runs. */
     private static final long SEED = 42L;
 
-    /** Flag set during {@link #checkSimsimd()} indicating whether the native SimSIMD library loaded. */
+    /** Flag indicating whether the native SimSIMD library is available, using the new isAvailable() API. */
     private static boolean simsimdAvailable;
 
     /**
-     * Attempts to load the SimSIMD native library before any tests run.
-     * If the JNI shared library is not on {@code java.library.path}, all SimSIMD tests
-     * will be skipped via JUnit assumptions rather than failing outright.
+     * Checks SimSIMD availability using the new {@link Metric.Engine#isAvailable()} method.
+     * If the native library is not available, all SimSIMD tests will be skipped via JUnit
+     * assumptions rather than failing outright.
      */
     @BeforeAll
     static void checkSimsimd() {
-        try {
-            Metric.Engine.SIMSIMD.getMetric().l2Distance(new float[]{1f}, new float[]{2f});
-            simsimdAvailable = true;
-        }
-        catch (UnsatisfiedLinkError e) {
-            simsimdAvailable = false;
+        simsimdAvailable = Metric.Engine.SIMSIMD.isAvailable();
+        if (!simsimdAvailable) {
             System.err.println("SimSIMD native library not available, skipping SIMSIMD tests");
         }
     }

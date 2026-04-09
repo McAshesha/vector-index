@@ -13,16 +13,20 @@ class ScalarMetricTest {
     private final Metric scalar = new Scalar();
     private final Metric vectorApi = new VectorAPI();
 
+    /**
+     * With lazy SIMSIMD initialization, Engine class loading no longer fails when the native
+     * library is unavailable. SCALAR is always available, so this flag is always true.
+     * Kept for backward compatibility with the assumeTrue() guards below.
+     */
     private static boolean engineAvailable;
 
     @BeforeAll
     static void checkEngineAvailable() {
-        try {
-            Metric.Engine.SCALAR.getMetric();
-            engineAvailable = true;
-        } catch (ExceptionInInitializerError | NoClassDefFoundError | UnsatisfiedLinkError e) {
-            engineAvailable = false;
-        }
+        // Engine.SCALAR.isAvailable() always returns true since Scalar is pure Java.
+        // Previously this check was needed because constructing the Engine enum triggered
+        // SimSIMD class loading, which could throw ExceptionInInitializerError and kill
+        // the entire enum. With lazy initialization, this is no longer a concern.
+        engineAvailable = Metric.Engine.SCALAR.isAvailable();
     }
 
     // ==================== L2 Distance ====================

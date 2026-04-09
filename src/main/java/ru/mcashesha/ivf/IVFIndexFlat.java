@@ -1,6 +1,5 @@
 package ru.mcashesha.ivf;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicIntegerArray;
@@ -11,12 +10,15 @@ import ru.mcashesha.metrics.Metric;
 /**
  * Flat (uncompressed) implementation of the {@link IVFIndex} interface for approximate nearest neighbor search.
  *
- * <h3>Storage Layout</h3>
- * <p>Vectors are stored contiguously in a flat array, reordered by cluster assignment after the build phase.
- * Instead of maintaining per-cluster lists, this implementation uses an offset-based scheme:
- * {@code clusterOffsets[c]} marks the start index and {@code clusterOffsets[c+1]} marks the exclusive end
- * of cluster {@code c}'s vectors in the {@code data} and {@code ids} arrays. This layout improves
- * cache locality during search, as all vectors in a cluster occupy a contiguous memory region.</p>
+ * <h3>Storage Layout (Flat Array)</h3>
+ * <p>Vectors are stored in a single contiguous {@code float[]} array ({@code flatData}), where
+ * vector {@code i} occupies positions {@code [i * dimension, (i + 1) * dimension)}. This flat
+ * layout eliminates per-vector object headers (16 bytes each on a 64-bit JVM) and pointer
+ * indirection, ensuring that scanning a cluster is a purely sequential memory access pattern
+ * with no cache misses from pointer chasing. The vectors are reordered by cluster assignment
+ * after the build phase, so {@code clusterOffsets[c]} marks the start index and
+ * {@code clusterOffsets[c+1]} marks the exclusive end of cluster {@code c}'s vectors in
+ * {@code flatData} and {@code ids}.</p>
  *
  * <h3>Build Phase</h3>
  * <ol>
@@ -38,7 +40,7 @@ import ru.mcashesha.metrics.Metric;
  * <p>The implementation applies parallelism at several stages when the workload exceeds configurable thresholds:</p>
  * <ul>
  *   <li><b>Data reordering</b> (build): parallelized when the dataset has &ge; 10,000 vectors.</li>
- *   <li><b>Centroid distance computation</b> (search): parallelized when there are &ge; 32 clusters.</li>
+ *   <li><b>Centroid distance computation</b> (search): parallelized when there are &ge; 256 clusters.</li>
  *   <li><b>Cluster scanning</b> (search): parallelized when total points to scan &ge; 2,000 and nProbe &ge; 2.
  *       Each cluster builds a local top-K heap, which are then merged into a global top-K heap.</li>
  *   <li><b>Batch search</b>: queries are processed fully in parallel via {@code IntStream.parallel()}.</li>
@@ -67,8 +69,13 @@ public class IVFIndexFlat implements IVFIndex {
      */
     private int[] clusterOffsets;
 
-    /** Reordered dataset: vectors are grouped contiguously by cluster assignment for cache locality. */
-    private float[][] data;
+    /**
+     * Flat (one-dimensional) storage for all reordered vectors. Vector at logical index {@code i}
+     * starts at {@code flatData[i * dimension]} and spans {@code dimension} consecutive floats.
+     * This flat layout avoids per-vector object headers and pointer indirection, providing
+     * superior cache locality compared to a {@code float[][]} jagged array.
+     */
+    private float[] flatData;
 
     /** Reordered IDs corresponding to each vector in {@code data}. */
     private int[] ids;
@@ -76,17 +83,73 @@ public class IVFIndexFlat implements IVFIndex {
     /** The dimensionality of each vector. */
     private int dimension;
 
-    /** Flag indicating whether the index has been built and is ready for search queries. */
-    private boolean built;
+    /**
+     * Flag indicating whether the index has been built and is ready for search queries.
+     * Volatile write at the end of build() acts as a release fence, ensuring all preceding stores
+     * (centroids, flatData, ids, clusterOffsets, distFn, distOffsetFn) are visible to any thread
+     * that subsequently reads built=true.
+     */
+    private volatile boolean built;
 
-    /** Resolved distance function, cached after build to avoid repeated virtual dispatch on the hot path. */
+    /** Resolved distance function for centroid comparisons, cached to avoid repeated virtual dispatch. */
     private Metric.DistanceFunction distFn;
 
     /**
-     * Minimum number of clusters required to parallelize centroid distance computation.
-     * Below this threshold, sequential computation is faster due to parallelism overhead.
+     * Resolved offset-aware distance function for scanning flat data, cached after build.
+     * This function computes distance between a query vector and a sub-region of {@code flatData}
+     * without creating temporary array copies, enabling zero-copy scanning on the hot path.
      */
-    private static final int PARALLEL_CENTROID_THRESHOLD = 32;
+    private Metric.OffsetDistanceFunction distOffsetFn;
+
+    /**
+     * Thread-local buffers eliminate per-query allocation of working arrays in
+     * {@link #searchInternal}. At high QPS this avoids millions of short-lived
+     * allocations per second, significantly reducing GC pressure.
+     *
+     * <p>Initialized at the end of {@link #build(float[][], int[])} once the index
+     * dimensions are known. Marked {@code transient} because {@code ThreadLocal}
+     * instances are inherently non-serializable.</p>
+     */
+    private transient ThreadLocal<SearchBuffers> searchBuffersTL;
+
+    /**
+     * Reusable per-thread working arrays for the search hot path.
+     *
+     * <p>Each buffer set is sized for a specific cluster count and topK. If a search
+     * request requires larger arrays (e.g., after a rebuild with more clusters), the
+     * buffers are re-allocated on that thread. Otherwise they are reused as-is,
+     * eliminating per-query allocation entirely.</p>
+     */
+    private static class SearchBuffers {
+        float[] centroidDistances;
+        int[] clusterOrder;
+        float[] heapDistances;
+        int[] heapIds;
+        int[] heapClusterIds;
+
+        SearchBuffers(int clusterCnt, int topK) {
+            this.centroidDistances = new float[clusterCnt];
+            this.clusterOrder = new int[clusterCnt];
+            this.heapDistances = new float[topK];
+            this.heapIds = new int[topK];
+            this.heapClusterIds = new int[topK];
+        }
+    }
+
+    /**
+     * Conservative multiplier for cluster skipping in sequential search. When the current
+     * worst result in the top-K heap is less than this factor times the centroid distance
+     * of the next cluster, the remaining clusters are skipped.
+     */
+    private static final float CLUSTER_SKIP_FACTOR = 0.5f;
+
+    /**
+     * Minimum number of clusters required to parallelize centroid distance computation.
+     * Threshold set to amortize ForkJoinPool overhead (~50-100us) against useful work.
+     * At 256 clusters with ~1us per distance computation, the parallel work (~256us)
+     * justifies the overhead.
+     */
+    private static final int PARALLEL_CENTROID_THRESHOLD = 256;
 
     /**
      * Minimum total number of points across all probed clusters required to parallelize cluster scanning.
@@ -207,9 +270,11 @@ public class IVFIndexFlat implements IVFIndex {
             clusterOffsets[c + 1] = clusterOffsets[c] + sizes[c];
 
         // Step 3: Reorder vectors and IDs so each cluster's data is contiguous in memory.
-        // This dramatically improves cache locality during search, since scanning a cluster
-        // becomes a sequential memory access pattern.
-        float[][] reorderedData = new float[vectors.length][];
+        // Vectors are packed into a single flat float[] array for optimal cache locality:
+        // vector at logical index pos starts at flatData[pos * dimension].
+        // This eliminates per-vector object headers (16 bytes each) and pointer indirection,
+        // making cluster scanning a purely sequential memory access pattern.
+        float[] reorderedFlatData = new float[vectors.length * locDimension];
         int[] reorderedIds = new int[vectors.length];
 
         int n = assignments.length;
@@ -233,13 +298,13 @@ public class IVFIndexFlat implements IVFIndex {
                 }
             });
 
-            // Pass 2: Parallel scatter -- each vector is written to its computed target position.
-            // Since each target position is unique (guaranteed by atomic increment), there are
-            // no write conflicts and no synchronization is needed.
+            // Pass 2: Parallel scatter -- each vector is copied into the flat array at its
+            // computed target position. System.arraycopy provides a defensive copy of each
+            // vector's data, so mutations to the original vectors array will not affect the index.
             IntStream.range(0, n).parallel().forEach(i -> {
                 int pos = targetPos[i];
                 if (pos >= 0) {
-                    reorderedData[pos] = vectors[i];
+                    System.arraycopy(vectors[i], 0, reorderedFlatData, pos * locDimension, locDimension);
                     reorderedIds[pos] = originalIds[i];
                 }
             });
@@ -253,17 +318,25 @@ public class IVFIndexFlat implements IVFIndex {
                 if (c < 0 || c >= clusterCnt)
                     continue;
                 int pos = writePos[c]++;
-                reorderedData[pos] = vectors[i];
+                // Copy vector data into the flat array (defensive copy)
+                System.arraycopy(vectors[i], 0, reorderedFlatData, pos * locDimension, locDimension);
                 reorderedIds[pos] = originalIds[i];
             }
         }
 
-        this.data = reorderedData;
+        this.flatData = reorderedFlatData;
         this.ids = reorderedIds;
 
-        // Cache the resolved distance function to avoid virtual dispatch on every distance computation.
-        // This is important because distance computation is the innermost hot-path operation.
+        // Cache the resolved distance functions to avoid virtual dispatch on every distance
+        // computation. The offset-aware function is used for scanning flat data on the hot path;
+        // the standard function is used for centroid distance computation.
         this.distFn = kMeans.getMetricType().resolveFunction(kMeans.getMetricEngine());
+        this.distOffsetFn = kMeans.getMetricType().resolveOffsetFunction(kMeans.getMetricEngine());
+
+        // Initialize thread-local search buffers. Each thread lazily creates its own
+        // SearchBuffers instance on first use. This eliminates per-query allocation
+        // of centroid distance arrays, cluster ordering arrays, and heap arrays.
+        this.searchBuffersTL = ThreadLocal.withInitial(() -> new SearchBuffers(clusterCnt, 0));
 
         this.built = true;
     }
@@ -486,7 +559,7 @@ public class IVFIndexFlat implements IVFIndex {
      *
      * <p>This method performs the following steps:</p>
      * <ol>
-     *   <li>Compute distances from the query to all cluster centroids (parallelized for &ge; 32 clusters).</li>
+     *   <li>Compute distances from the query to all cluster centroids (parallelized for &ge; 256 clusters).</li>
      *   <li>Select the {@code nProbe} nearest centroids via {@link #selectNearestClusters}.</li>
      *   <li>Count the total points across selected clusters to decide sequential vs. parallel scanning.</li>
      *   <li>Scan the selected clusters, maintaining a streaming top-K max-heap.</li>
@@ -506,13 +579,25 @@ public class IVFIndexFlat implements IVFIndex {
         // Clamp nProbe to valid range [1, clusterCnt]
         nProbe = Math.max(1, Math.min(nProbe, clusterCnt));
 
-        // Capture the distance function in a local variable to avoid field access on each iteration
+        // Capture distance functions in local variables to avoid field access on each iteration.
+        // distFn is used for centroid comparisons; distOffsetFn is used for flat data scanning.
         Metric.DistanceFunction fn = this.distFn;
+        Metric.OffsetDistanceFunction offsetFn = this.distOffsetFn;
 
-        // Allocate thread-local buffers for centroid distances and cluster ordering.
-        // This avoids shared state and makes the method safe for concurrent invocation.
-        float[] localCentroidDistances = new float[clusterCnt];
-        int[] localClusterOrder = new int[clusterCnt];
+        // Thread-local buffers eliminate per-query allocation.
+        // Obtain the cached buffers and re-allocate only if the current sizes are insufficient.
+        SearchBuffers buffers = searchBuffersTL.get();
+        if (buffers.centroidDistances.length < clusterCnt) {
+            buffers.centroidDistances = new float[clusterCnt];
+            buffers.clusterOrder = new int[clusterCnt];
+        }
+        if (buffers.heapDistances.length < topK) {
+            buffers.heapDistances = new float[topK];
+            buffers.heapIds = new int[topK];
+            buffers.heapClusterIds = new int[topK];
+        }
+        float[] localCentroidDistances = buffers.centroidDistances;
+        int[] localClusterOrder = buffers.clusterOrder;
 
         // Compute distances from the query to each centroid.
         // For large cluster counts, parallelize the distance computation.
@@ -539,11 +624,12 @@ public class IVFIndexFlat implements IVFIndex {
         // Use parallel scanning when the workload is large enough to justify the overhead.
         // Requires both sufficient total points AND at least 2 clusters to distribute work.
         if (totalPointsToScan >= PARALLEL_CLUSTER_SCAN_THRESHOLD && nProbe >= 2) {
-            return searchClustersParallel(qry, topK, nProbe, localClusterOrder, fn);
+            return searchClustersParallel(qry, topK, nProbe, localClusterOrder, offsetFn);
         }
 
-        // Sequential cluster scanning for small workloads
-        return searchClustersSequential(qry, topK, nProbe, localClusterOrder, fn);
+        // Sequential cluster scanning for small workloads -- reuse thread-local heap arrays
+        return searchClustersSequential(qry, topK, nProbe, localClusterOrder, localCentroidDistances, offsetFn,
+            buffers.heapDistances, buffers.heapIds, buffers.heapClusterIds);
     }
 
     /**
@@ -558,29 +644,52 @@ public class IVFIndexFlat implements IVFIndex {
      * <p>This "replace-root-and-sift" pattern achieves O(n * log(k)) time for streaming top-K,
      * where n is the number of scanned vectors and k is topK.</p>
      *
+     * <p>Heap arrays are provided by the caller (typically from thread-local buffers) to avoid
+     * per-query allocation. The arrays must have length &ge; {@code topK}.</p>
+     *
      * @param qry              the query vector
      * @param topK             the number of nearest neighbors to return
      * @param nProbe           the number of clusters to scan
-     * @param localClusterOrder the indices of the selected clusters, sorted by ascending centroid distance
-     * @param fn               the distance function to use
+     * @param localClusterOrder      the indices of the selected clusters, sorted by ascending centroid distance
+     * @param localCentroidDistances precomputed distances from the query to each centroid
+     * @param offsetFn               the offset-aware distance function to use
+     * @param heapDistances          pre-allocated distance array for the top-K heap (length &ge; topK)
+     * @param heapIds                pre-allocated ID array for the top-K heap (length &ge; topK)
+     * @param heapClusterIds         pre-allocated cluster ID array for the top-K heap (length &ge; topK)
      * @return sorted list of up to {@code topK} nearest neighbors
      */
     private List<SearchResult> searchClustersSequential(float[] qry, int topK, int nProbe,
-                                                         int[] localClusterOrder, Metric.DistanceFunction fn) {
-        // Parallel arrays for the top-K max-heap
-        int[] heapIds = new int[topK];
-        float[] heapDistances = new float[topK];
-        int[] heapClusterIds = new int[topK];
+                                                         int[] localClusterOrder,
+                                                         float[] localCentroidDistances,
+                                                         Metric.OffsetDistanceFunction offsetFn,
+                                                         float[] heapDistances,
+                                                         int[] heapIds,
+                                                         int[] heapClusterIds) {
         int heapSize = 0;
+
+        // Capture flat data and dimension in locals for hot-loop performance
+        float[] flat = this.flatData;
+        int dim = this.dimension;
 
         for (int p = 0; p < nProbe; p++) {
             int clusterId = localClusterOrder[p];
-            // Contiguous range [start, end) for this cluster in the reordered data array
+
+            // Conservative cluster skipping: if the current worst result is less than half
+            // the centroid distance, it is unlikely (though not impossible) that this cluster
+            // contains closer points. The 0.5 factor provides a safety margin.
+            if (heapSize == topK
+                    && heapDistances[0] < localCentroidDistances[localClusterOrder[p]] * CLUSTER_SKIP_FACTOR) {
+                break;
+            }
+
+            // Contiguous range [start, end) for this cluster in the reordered data/ids arrays.
+            // In the flat array, vector at logical index i starts at flat[i * dim].
             int start = clusterOffsets[clusterId];
             int end = clusterOffsets[clusterId + 1];
 
             for (int i = start; i < end; i++) {
-                float d = fn.compute(qry, data[i]);
+                // Compute distance directly against the flat array without creating a sub-array copy
+                float d = offsetFn.compute(qry, flat, i * dim, dim);
 
                 if (heapSize < topK) {
                     // Heap not yet full -- insert unconditionally
@@ -622,7 +731,8 @@ public class IVFIndexFlat implements IVFIndex {
      * @return sorted list of up to {@code topK} nearest neighbors
      */
     private List<SearchResult> searchClustersParallel(float[] qry, int topK, int nProbe,
-                                                       int[] localClusterOrder, Metric.DistanceFunction fn) {
+                                                       int[] localClusterOrder,
+                                                       Metric.OffsetDistanceFunction offsetFn) {
         // Allocate per-cluster heap buffers. Each cluster gets independent arrays
         // so parallel threads do not contend on shared state.
         int[][] localHeapIds = new int[nProbe][topK];
@@ -630,11 +740,21 @@ public class IVFIndexFlat implements IVFIndex {
         int[][] localHeapClusterIds = new int[nProbe][topK];
         int[] localHeapSizes = new int[nProbe];
 
+        // Capture flat data and dimension in locals for hot-loop performance
+        float[] flat = this.flatData;
+        int dim = this.dimension;
+
         // Parallel per-cluster scanning: each cluster builds its own local top-K heap
         IntStream.range(0, nProbe).parallel().forEach(p -> {
             int clusterId = localClusterOrder[p];
             int start = clusterOffsets[clusterId];
             int end = clusterOffsets[clusterId + 1];
+
+            // Skip empty clusters -- no vectors to scan
+            if (start == end) {
+                localHeapSizes[p] = 0;
+                return;
+            }
 
             // Local references to this cluster's heap arrays for reduced indirection
             int[] hIds = localHeapIds[p];
@@ -643,7 +763,8 @@ public class IVFIndexFlat implements IVFIndex {
             int hSize = 0;
 
             for (int i = start; i < end; i++) {
-                float d = fn.compute(qry, data[i]);
+                // Compute distance directly against the flat array (zero-copy)
+                float d = offsetFn.compute(qry, flat, i * dim, dim);
 
                 if (hSize < topK) {
                     hIds[hSize] = ids[i];

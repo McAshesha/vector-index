@@ -124,6 +124,13 @@ public interface KMeans<R extends KMeans.ClusteringResult> {
      * <p>All parameters have sensible defaults. The builder validates inputs and
      * dispatches to the appropriate implementation based on the specified {@link Type}.</p>
      *
+     * <p><b>Warning:</b> Using {@link Metric.Type#DOT_PRODUCT} with KMeans is only
+     * appropriate for normalized (unit-length) input vectors. For unnormalized data,
+     * the optimal centroid under negated dot product tends toward infinity, causing
+     * the algorithm to produce meaningless results. Use {@link Metric.Type#COSINE_DISTANCE}
+     * instead for unnormalized data -- it internally normalizes centroids and measures
+     * angular similarity.</p>
+     *
      * <h3>Defaults:</h3>
      * <ul>
      *   <li>{@code clusterCount} = 16</li>
@@ -135,6 +142,7 @@ public interface KMeans<R extends KMeans.ClusteringResult> {
      *   <li>{@code maxDepth} = 6 (Hierarchical only)</li>
      *   <li>{@code minClusterSize} = max(2 * branchFactor, 2) (Hierarchical only)</li>
      *   <li>{@code maxIterationsPerLevel} = 50 (Hierarchical only)</li>
+     *   <li>{@code beamWidth} = 1 (Hierarchical only; 1 = greedy, &gt;1 = beam search)</li>
      * </ul>
      */
     final class Builder {
@@ -170,6 +178,8 @@ public interface KMeans<R extends KMeans.ClusteringResult> {
         private int maxIterationsPerLevel = 50;
         /** Tracks whether the user explicitly set minClusterSize, preventing auto-adjustment. */
         private boolean minClusterSizeOverridden;
+        /** Beam width for hierarchical KMeans prediction (1 = greedy, >1 = beam search). Default: 1. */
+        private int beamWidth = 1;
 
         /** Random number generator for initialization and sampling. */
         private Random random = new Random();
@@ -318,6 +328,26 @@ public interface KMeans<R extends KMeans.ClusteringResult> {
         }
 
         /**
+         * Sets the beam width for prediction in {@link Type#HIERARCHICAL} KMeans.
+         *
+         * <p>During prediction, the tree is traversed from root to leaf. With the
+         * default beam width of 1 (greedy), only the nearest child is followed at
+         * each internal node. This is fast but susceptible to boundary effects where
+         * the query point is near the decision boundary between children.</p>
+         *
+         * <p>With a beam width greater than 1, the top {@code beamWidth} candidate
+         * nodes are retained at each level, improving recall at the cost of additional
+         * distance computations. Ignored by non-hierarchical algorithm types.</p>
+         *
+         * @param beamWidth the number of candidates to retain at each tree level; must be positive
+         * @return this builder for method chaining
+         */
+        public Builder withBeamWidth(int beamWidth) {
+            this.beamWidth = beamWidth;
+            return this;
+        }
+
+        /**
          * Sets the random number generator for centroid initialization and sampling.
          *
          * <p>Providing a seeded {@link Random} enables reproducible clustering results.</p>
@@ -375,7 +405,8 @@ public interface KMeans<R extends KMeans.ClusteringResult> {
                         tolerance,
                         random,
                         metricType,
-                        metricEngine
+                        metricEngine,
+                        beamWidth
                     );
                 }
                 default: {

@@ -97,6 +97,28 @@ public interface Metric {
     }
 
     /**
+     * Functional interface for computing distance between a full vector {@code a} and a
+     * sub-region of a flat (one-dimensional) vector array {@code b}.
+     *
+     * <p>This is the offset-aware variant of {@link DistanceFunction}, designed for use
+     * with flat storage layouts where all vectors are packed contiguously into a single
+     * {@code float[]}. Enables true zero-copy distance computation against flat data.</p>
+     */
+    @FunctionalInterface
+    interface OffsetDistanceFunction {
+        /**
+         * Computes the distance between vector {@code a} and a sub-region of array {@code b}.
+         *
+         * @param a       first vector (full array, read from index 0 to {@code length - 1})
+         * @param b       flat array containing packed vectors
+         * @param bOffset starting index in {@code b} for the second vector
+         * @param length  number of elements (dimensions) to compare
+         * @return the distance value (lower = more similar)
+         */
+        float compute(float[] a, float[] b, int bOffset, int length);
+    }
+
+    /**
      * Enumerates the supported distance metric types.
      *
      * <p>Each constant delegates to the corresponding method on a {@link Metric}
@@ -113,7 +135,7 @@ public interface Metric {
          */
         L2SQ_DISTANCE() {
             @Override public float distance(Engine engine, float[] a, float[] b) {
-                return engine.metric.l2Distance(a, b);
+                return engine.getMetric().l2Distance(a, b);
             }
         },
         /**
@@ -128,7 +150,7 @@ public interface Metric {
         DOT_PRODUCT {
             @Override public float distance(Engine engine, float[] a, float[] b) {
                 // Negate so that higher dot product (= more similar) becomes lower distance
-                return -engine.metric.dotProduct(a, b);
+                return -engine.getMetric().dotProduct(a, b);
             }
         },
         /**
@@ -140,7 +162,7 @@ public interface Metric {
          */
         COSINE_DISTANCE {
             @Override public float distance(Engine engine, float[] a, float[] b) {
-                return engine.metric.cosineDistance(a, b);
+                return engine.getMetric().cosineDistance(a, b);
             }
         };
 
@@ -176,13 +198,40 @@ public interface Metric {
          * @throws IllegalStateException if the metric type is unrecognized
          */
         public DistanceFunction resolveFunction(Engine engine) {
-            Metric m = engine.metric;
+            Metric m = engine.getMetric();
             switch (this) {
                 case L2SQ_DISTANCE: return m::l2Distance;
                 case DOT_PRODUCT: return (a, b) -> -m.dotProduct(a, b);
                 case COSINE_DISTANCE: return m::cosineDistance;
                 default: throw new IllegalStateException("Unknown metric type: " + this);
             }
+        }
+
+        /**
+         * Resolves an {@link OffsetDistanceFunction} for the given engine.
+         *
+         * <p>If the engine's {@link Metric} implements {@link OffsetMetric}, returns
+         * a zero-copy offset function. Otherwise falls back to creating a temporary
+         * sub-array copy via {@link java.util.Arrays#copyOfRange}.</p>
+         *
+         * @param engine the computation engine
+         * @return an {@link OffsetDistanceFunction} for this metric type
+         */
+        public OffsetDistanceFunction resolveOffsetFunction(Engine engine) {
+            Metric m = engine.getMetric();
+            if (m instanceof OffsetMetric) {
+                OffsetMetric om = (OffsetMetric) m;
+                switch (this) {
+                    case L2SQ_DISTANCE: return om::l2Distance;
+                    case DOT_PRODUCT: return (a, b, off, len) -> -om.dotProduct(a, b, off, len);
+                    case COSINE_DISTANCE: return om::cosineDistance;
+                    default: throw new IllegalStateException("Unknown metric type: " + this);
+                }
+            }
+            // Fallback: create a temporary sub-array copy (not zero-copy, but correct)
+            DistanceFunction fn = resolveFunction(engine);
+            return (a, b, bOffset, length) ->
+                fn.compute(a, java.util.Arrays.copyOfRange(b, bOffset, bOffset + length));
         }
     }
 
@@ -199,38 +248,119 @@ public interface Metric {
      *       requires the {@code simsimd_jni} shared library on the library path.</li>
      * </ul>
      *
-     * <p>Engines are singletons -- each enum constant holds exactly one {@link Metric}
-     * instance, created at class load time.</p>
+     * <h3>Lazy initialization for SIMSIMD</h3>
+     * <p>SCALAR and VECTOR_API are eagerly initialized because they are pure Java and
+     * always available. SIMSIMD, however, is initialized lazily: its {@link SimSIMD}
+     * instance is created on first access via {@link #getMetric()}. This design prevents
+     * the enum class initializer from failing when the native library is unavailable.
+     * Without lazy initialization, constructing {@code new SimSIMD()} in the enum constant
+     * would trigger the static initializer of {@link SimSIMD}, and any
+     * {@link UnsatisfiedLinkError} would propagate up through the enum's {@code <clinit>},
+     * killing the entire {@code Engine} class -- including the SCALAR and VECTOR_API
+     * constants that have no native dependency.</p>
+     *
+     * <p>Use {@link #isAvailable()} to check whether an engine can be used without
+     * risking an exception.</p>
      */
     enum Engine {
-        /** Pure Java scalar (loop-based) distance computation. */
+        /** Pure Java scalar (loop-based) distance computation. Always available. */
         SCALAR(new Scalar()),
 
-        /** SIMD-accelerated distance computation via Java Vector API (jdk.incubator.vector). */
+        /** SIMD-accelerated distance computation via Java Vector API (jdk.incubator.vector). Always available. */
         VECTOR_API(new VectorAPI()),
 
-        /** Native C distance computation via SimSIMD JNI bridge. */
-        SIMSIMD(new SimSIMD());
+        /**
+         * Native C distance computation via SimSIMD JNI bridge.
+         *
+         * <p>This engine uses lazy initialization: the {@link SimSIMD} instance is not
+         * created until the first call to {@link #getMetric()}. If the native library
+         * cannot be loaded, {@link #getMetric()} throws {@link UnsatisfiedLinkError}
+         * and {@link #isAvailable()} returns {@code false}, but the other engines
+         * remain fully functional.</p>
+         */
+        SIMSIMD(null);  // null signals lazy initialization; see getMetric()
 
-        /** The concrete {@link Metric} implementation used by this engine. */
-        final Metric metric;
+        /**
+         * The concrete {@link Metric} implementation used by this engine, or {@code null}
+         * for lazily-initialized engines (specifically SIMSIMD). For eagerly-initialized
+         * engines (SCALAR, VECTOR_API), this field is set in the constructor and never
+         * changes. For SIMSIMD, the actual instance is held in {@link SimSIMDHolder}.
+         */
+        private final Metric metric;
 
         /**
          * Constructs an engine with the given metric implementation.
          *
-         * @param metric the concrete distance computation implementation
+         * @param metric the concrete distance computation implementation, or {@code null}
+         *               to indicate that this engine uses lazy initialization
          */
         Engine(Metric metric) {
             this.metric = metric;
         }
 
         /**
+         * Initialization-on-demand holder for the SimSIMD metric instance.
+         *
+         * <p>This uses the "lazy holder" idiom (also known as the Bill Pugh singleton):
+         * the JVM guarantees that the inner class is not loaded until it is first referenced,
+         * which happens only when {@link Engine#getMetric()} is called on {@link #SIMSIMD}.
+         * This provides thread-safe lazy initialization without explicit synchronization.</p>
+         *
+         * <p>The SimSIMD class's static initializer now captures load errors instead of
+         * propagating them, so creating {@code new SimSIMD()} here will never throw.
+         * However, calling any distance method on the instance will throw
+         * {@link UnsatisfiedLinkError} if the native library failed to load.</p>
+         */
+        private static class SimSIMDHolder {
+            static final SimSIMD INSTANCE = new SimSIMD();
+        }
+
+        /**
          * Returns the concrete {@link Metric} implementation held by this engine.
          *
-         * @return the metric implementation
+         * <p>For {@link #SCALAR} and {@link #VECTOR_API}, this returns the eagerly-created
+         * instance. For {@link #SIMSIMD}, this triggers lazy initialization via
+         * {@link SimSIMDHolder} on first call. The returned SimSIMD instance is always
+         * non-null, but its methods will throw {@link UnsatisfiedLinkError} if the native
+         * library was not loaded. Use {@link #isAvailable()} to check before calling.</p>
+         *
+         * @return the metric implementation (never {@code null})
          */
         Metric getMetric() {
-            return metric;
+            // For eagerly-initialized engines, return the pre-created instance directly.
+            // For SIMSIMD (where metric is null), delegate to the lazy holder class.
+            // The holder class is loaded by the JVM only on first access, providing
+            // thread-safe lazy initialization without synchronization overhead.
+            if (metric != null) {
+                return metric;
+            }
+            return SimSIMDHolder.INSTANCE;
+        }
+
+        /**
+         * Returns whether this engine is available for use.
+         *
+         * <p>For {@link #SCALAR} and {@link #VECTOR_API}, this always returns {@code true}
+         * since they are pure Java implementations with no external dependencies.
+         * For {@link #SIMSIMD}, this returns {@code true} only if the native library
+         * was loaded successfully.</p>
+         *
+         * <p>This method never throws an exception, making it safe to use in conditional
+         * logic, logging, and test assumptions.</p>
+         *
+         * @return {@code true} if calling distance methods on this engine will succeed,
+         *         {@code false} if the engine's native dependency is unavailable
+         */
+        boolean isAvailable() {
+            // SCALAR and VECTOR_API are always available (pure Java, no native deps).
+            // SIMSIMD availability depends on whether the native library loaded successfully.
+            // We check via SimSIMD.isAvailable() which inspects SimSIMD.LOAD_ERROR.
+            // Note: calling SimSIMD.isAvailable() triggers SimSIMD class loading, which
+            // is fine because the static initializer is now fail-safe.
+            if (this == SIMSIMD) {
+                return SimSIMD.isAvailable();
+            }
+            return true;
         }
     }
 

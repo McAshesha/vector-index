@@ -215,7 +215,9 @@ final class KMeansUtils {
         }
 
         // Sequential path for small datasets
-        float loss = 0f;
+        // Use double accumulation to prevent precision loss over many summands
+        // (float has ~7 significant digits, which degrades after >100K additions).
+        double loss = 0.0;
 
         for (int i = 0; i < sampleCnt; i++) {
             float[] point = data[i];
@@ -243,7 +245,7 @@ final class KMeansUtils {
                 pointErrors[i] = nearestDistance;
         }
 
-        return loss;
+        return (float) loss;
     }
 
     /**
@@ -316,6 +318,9 @@ final class KMeansUtils {
      * using thread-local buffers to avoid synchronization. The final averaging and optional
      * L2 normalization (for cosine distance) are applied after accumulation.</p>
      *
+     * <p>Delegates to the overload accepting pre-allocated buffers, passing {@code null}
+     * to trigger fresh allocation.</p>
+     *
      * @param data         the input dataset
      * @param labels       per-point cluster assignments from the most recent assignment step
      * @param newCentroids output array to receive the recomputed centroid positions;
@@ -334,6 +339,46 @@ final class KMeansUtils {
         int dimension,
         Metric.Type metricType) {
 
+        recomputeCentroids(data, labels, newCentroids, clusterSizes, clusterCnt, dimension, metricType, null, null);
+    }
+
+    /**
+     * Recomputes centroids as the mean of all points assigned to each cluster, optionally
+     * reusing pre-allocated thread-local buffers for the parallel accumulation path.
+     *
+     * <p>Pre-allocated buffers avoid per-iteration allocation of O(threads * k * d) memory.
+     * When {@code preallocLocalSums} and {@code preallocLocalCounts} are non-null, they are
+     * zeroed and reused instead of allocating new arrays. This eliminates tens of megabytes
+     * of garbage per iteration for large cluster counts and high dimensionality.</p>
+     *
+     * <p>For datasets exceeding {@link #PARALLEL_THRESHOLD}, accumulation is parallelized
+     * using thread-local buffers to avoid synchronization. The final averaging and optional
+     * L2 normalization (for cosine distance) are applied after accumulation.</p>
+     *
+     * @param data                the input dataset
+     * @param labels              per-point cluster assignments from the most recent assignment step
+     * @param newCentroids        output array to receive the recomputed centroid positions;
+     *                            must be pre-allocated as {@code float[clusterCnt][dimension]}
+     * @param clusterSizes        output array to receive per-cluster membership counts
+     * @param clusterCnt          the number of clusters
+     * @param dimension           the dimensionality of data points
+     * @param metricType          the metric type; centroids are L2-normalized if cosine distance
+     * @param preallocLocalSums   pre-allocated buffer {@code float[numThreads][clusterCnt][dimension]}
+     *                            for parallel accumulation, or {@code null} to allocate fresh arrays
+     * @param preallocLocalCounts pre-allocated buffer {@code int[numThreads][clusterCnt]}
+     *                            for parallel accumulation, or {@code null} to allocate fresh arrays
+     */
+    static void recomputeCentroids(
+        float[][] data,
+        int[] labels,
+        float[][] newCentroids,
+        int[] clusterSizes,
+        int clusterCnt,
+        int dimension,
+        Metric.Type metricType,
+        float[][][] preallocLocalSums,
+        int[][] preallocLocalCounts) {
+
         int sampleCnt = data.length;
 
         // Zero out accumulators before summing
@@ -343,7 +388,8 @@ final class KMeansUtils {
         }
 
         if (sampleCnt >= PARALLEL_THRESHOLD) {
-            recomputeCentroidsParallel(data, labels, newCentroids, clusterSizes, clusterCnt, dimension);
+            recomputeCentroidsParallel(data, labels, newCentroids, clusterSizes, clusterCnt, dimension,
+                preallocLocalSums, preallocLocalCounts);
         } else {
             // Sequential accumulation: sum all points belonging to each cluster
             for (int i = 0; i < sampleCnt; i++) {
@@ -381,12 +427,20 @@ final class KMeansUtils {
      * accumulates sums and counts into its own local buffer, eliminating the need for
      * locks or atomics. Results are merged across threads per-cluster in parallel.</p>
      *
-     * @param data         the input dataset
-     * @param labels       per-point cluster assignments
-     * @param newCentroids output array for centroid sums (to be averaged by the caller)
-     * @param clusterSizes output array for per-cluster counts
-     * @param clusterCnt   the number of clusters
-     * @param dimension    the dimensionality of data points
+     * <p>When pre-allocated buffers are provided (non-null), they are zeroed and reused,
+     * avoiding O(threads * k * d) allocation on every call. This is critical for iterative
+     * algorithms like Lloyd's KMeans where this method is called once per iteration.</p>
+     *
+     * @param data                the input dataset
+     * @param labels              per-point cluster assignments
+     * @param newCentroids        output array for centroid sums (to be averaged by the caller)
+     * @param clusterSizes        output array for per-cluster counts
+     * @param clusterCnt          the number of clusters
+     * @param dimension           the dimensionality of data points
+     * @param preallocLocalSums   pre-allocated {@code float[numThreads][clusterCnt][dimension]},
+     *                            or {@code null} to allocate fresh arrays
+     * @param preallocLocalCounts pre-allocated {@code int[numThreads][clusterCnt]},
+     *                            or {@code null} to allocate fresh arrays
      */
     private static void recomputeCentroidsParallel(
         float[][] data,
@@ -394,15 +448,32 @@ final class KMeansUtils {
         float[][] newCentroids,
         int[] clusterSizes,
         int clusterCnt,
-        int dimension) {
+        int dimension,
+        float[][][] preallocLocalSums,
+        int[][] preallocLocalCounts) {
 
         int sampleCnt = data.length;
         int numThreads = Runtime.getRuntime().availableProcessors();
         int chunkSize = (sampleCnt + numThreads - 1) / numThreads;
 
-        // Thread-local accumulators indexed as [threadIdx][clusterIdx][dimension]
-        float[][][] localSums = new float[numThreads][clusterCnt][dimension];
-        int[][] localCounts = new int[numThreads][clusterCnt];
+        // Use pre-allocated buffers if provided; otherwise allocate fresh arrays.
+        // Pre-allocated buffers avoid per-iteration allocation of O(threads * k * d) memory.
+        float[][][] localSums;
+        int[][] localCounts;
+
+        if (preallocLocalSums != null && preallocLocalCounts != null) {
+            localSums = preallocLocalSums;
+            localCounts = preallocLocalCounts;
+            // Zero out the pre-allocated buffers before accumulation
+            for (int t = 0; t < numThreads; t++) {
+                for (int c = 0; c < clusterCnt; c++)
+                    Arrays.fill(localSums[t][c], 0);
+                Arrays.fill(localCounts[t], 0);
+            }
+        } else {
+            localSums = new float[numThreads][clusterCnt][dimension];
+            localCounts = new int[numThreads][clusterCnt];
+        }
 
         // Each thread accumulates its data chunk into its own local buffers
         IntStream.range(0, numThreads).parallel().forEach(threadIdx -> {
@@ -737,13 +808,12 @@ final class KMeansUtils {
      * Assigns each data point to the nearest centroid, using distance-based pruning
      * to skip clusters that are likely not closer.
      *
-     * <p>The pruning condition {@code d(a, b) > 2 * d(x, a)} is inspired by the
-     * triangle inequality from Elkan's accelerated KMeans. For true metric distances
-     * (e.g., L2), this condition guarantees that centroid b cannot be closer to x
-     * than centroid a. For non-metric distances used here (L2 squared, negated dot
-     * product), this is a heuristic that may occasionally skip a centroid that is
-     * actually closer. This is acceptable because pruning is only used in intermediate
-     * iterations -- the final assignment pass uses unpruned brute-force search.</p>
+     * <p>The pruning condition {@code d²(a, b) > 4 * d²(x, a)} is derived from the
+     * triangle inequality in Elkan's accelerated KMeans, adapted for L2 squared distance:
+     * if d²(a,b) > 4·d²(x,a), then d(a,b) > 2·d(x,a), which guarantees centroid b
+     * cannot be closer to x than centroid a. This pruning is only valid for L2 squared
+     * distance where the triangle inequality holds; it is not used for dot product or
+     * cosine distance.</p>
      *
      * <p>This optimization is most effective when the number of clusters is large
      * (k >= 64), as it can eliminate a significant fraction of distance computations.</p>
@@ -779,7 +849,9 @@ final class KMeansUtils {
         }
 
         // Sequential path with triangle inequality pruning
-        float loss = 0f;
+        // Use double accumulation to prevent precision loss over many summands
+        // (float has ~7 significant digits, which degrades after >100K additions).
+        double loss = 0.0;
 
         for (int i = 0; i < sampleCnt; i++) {
             float[] point = data[i];
@@ -788,9 +860,9 @@ final class KMeansUtils {
             float nearestDistance = distFn.compute(point, centroids[0]);
 
             for (int c = 1; c < clusterCnt; c++) {
-                // Distance-based pruning: skip centroid c if it is likely farther.
-                // Exact for true metrics (L2); heuristic for L2 squared / dot product.
-                if (centroidDistances[nearestClusterIdx][c] > 2 * nearestDistance)
+                // For L2 squared: d²(a,b) > 4·d²(x,a) ⟹ d(a,b) > 2·d(x,a),
+                // so centroid b cannot be closer to x than centroid a by the triangle inequality.
+                if (centroidDistances[nearestClusterIdx][c] > 4 * nearestDistance)
                     continue;
 
                 float distance = distFn.compute(point, centroids[c]);
@@ -811,7 +883,7 @@ final class KMeansUtils {
                 pointErrors[i] = nearestDistance;
         }
 
-        return loss;
+        return (float) loss;
     }
 
     /**
@@ -851,8 +923,9 @@ final class KMeansUtils {
             float nearestDistance = distFn.compute(point, centroids[0]);
 
             for (int c = 1; c < clusterCnt; c++) {
-                // Distance-based pruning (same heuristic as sequential path)
-                if (centroidDistances[nearestClusterIdx][c] > 2 * nearestDistance)
+                // For L2 squared: d²(a,b) > 4·d²(x,a) ⟹ d(a,b) > 2·d(x,a),
+                // so centroid b cannot be closer to x than centroid a by the triangle inequality.
+                if (centroidDistances[nearestClusterIdx][c] > 4 * nearestDistance)
                     continue;
 
                 float distance = distFn.compute(point, centroids[c]);
