@@ -5,11 +5,42 @@ import java.util.Random;
 import java.util.stream.IntStream;
 import ru.mcashesha.metrics.Metric;
 
+/**
+ * Shared utility methods for all KMeans algorithm implementations.
+ *
+ * <p>Provides core building blocks used by {@link LloydKMeans}, {@link MiniBatchKMeans},
+ * and {@link HierarchicalKMeans}, including:</p>
+ * <ul>
+ *   <li>KMeans++ centroid initialization with D-squared weighted sampling</li>
+ *   <li>Nearest-centroid assignment (with optional triangle inequality pruning)</li>
+ *   <li>Mean-based centroid recomputation</li>
+ *   <li>Empty cluster redistribution</li>
+ *   <li>L2 normalization for cosine distance</li>
+ *   <li>Pairwise distance matrix computation</li>
+ * </ul>
+ *
+ * <p>Most methods automatically switch between sequential and parallel execution
+ * based on dataset size relative to {@link #PARALLEL_THRESHOLD}.</p>
+ *
+ * <p>This is a stateless utility class and cannot be instantiated.</p>
+ */
 final class KMeansUtils {
     private KMeansUtils() {}
 
+    /**
+     * Minimum number of data points required to trigger parallel execution paths.
+     * Below this threshold, sequential loops are used to avoid thread-pool overhead.
+     */
     private static final int PARALLEL_THRESHOLD = 1000;
 
+    /**
+     * Validates that all data points are non-null and share the same positive dimensionality.
+     *
+     * @param data the input dataset; each element is a feature vector
+     * @return the common dimensionality of all data points
+     * @throws IllegalArgumentException if any point is null, has zero dimension,
+     *                                  or has a dimension inconsistent with the first point
+     */
     static int validateAndGetDimension(float[][] data) {
         if (data[0] == null)
             throw new IllegalArgumentException("points must be non-null");
@@ -27,6 +58,37 @@ final class KMeansUtils {
         return dimension;
     }
 
+    /**
+     * Initializes cluster centroids using the KMeans++ algorithm (Arthur and Vassilvitskii, 2007).
+     *
+     * <p>KMeans++ selects initial centroids with probability proportional to the distance
+     * from the nearest already-chosen centroid. For L2 squared distance this is equivalent
+     * to the original D-squared weighting from the paper (since the raw L2 squared value
+     * equals the square of the Euclidean distance), providing an O(log k)-competitive
+     * approximation guarantee. For other metrics (dot product, cosine), the raw distance
+     * value is used as the sampling weight, which is a common generalization.</p>
+     *
+     * <p>The algorithm proceeds as follows:</p>
+     * <ol>
+     *   <li>Choose the first centroid uniformly at random from the data.</li>
+     *   <li>For each subsequent centroid, compute each point's minimum distance to the
+     *       nearest already-chosen centroid.</li>
+     *   <li>Sample the next centroid with probability proportional to that distance.</li>
+     *   <li>Repeat until all {@code clusterCnt} centroids are chosen.</li>
+     * </ol>
+     *
+     * <p>Distance computations and weight summation are parallelized when
+     * {@code sampleCnt >= PARALLEL_THRESHOLD}.</p>
+     *
+     * @param data       the input dataset
+     * @param sampleCnt  the number of data points ({@code data.length})
+     * @param dimension  the dimensionality of each data point
+     * @param clusterCnt the number of centroids to initialize
+     * @param distFn     the distance function to use
+     * @param metricType the metric type; centroids are L2-normalized if cosine distance
+     * @param random     the RNG for centroid selection
+     * @return a {@code float[clusterCnt][dimension]} array of initialized centroids
+     */
     static float[][] initializeCentroidsKMeansPlusPlus(
         float[][] data,
         int sampleCnt,
@@ -38,12 +100,14 @@ final class KMeansUtils {
 
         float[][] centroids = new float[clusterCnt][dimension];
 
+        // Step 1: Pick the first centroid uniformly at random
         int firstIdx = random.nextInt(sampleCnt);
         System.arraycopy(data[firstIdx], 0, centroids[0], 0, dimension);
 
+        // minDistances[i] holds the minimum distance from data[i] to any already-chosen centroid
         float[] minDistances = new float[sampleCnt];
 
-        // Parallelize initial distance computation
+        // Compute initial distances from all points to the first centroid
         float[] firstCentroid = centroids[0];
         if (sampleCnt >= PARALLEL_THRESHOLD) {
             IntStream.range(0, sampleCnt).parallel().forEach(i ->
@@ -53,8 +117,10 @@ final class KMeansUtils {
                 minDistances[i] = distFn.compute(data[i], firstCentroid);
         }
 
+        // Step 2-k: Choose remaining centroids with D-squared weighting
         for (int c = 1; c < clusterCnt; c++) {
-            // Sum weights - parallel reduction for large datasets
+            // Compute the total weight (sum of minimum distances) for probability normalization.
+            // Parallel reduction is used for large datasets.
             float totalWeight;
             if (sampleCnt >= PARALLEL_THRESHOLD) {
                 totalWeight = (float) IntStream.range(0, sampleCnt).parallel()
@@ -69,9 +135,12 @@ final class KMeansUtils {
             int chosenIdx;
 
             if (totalWeight == 0f)
+                // All points coincide with existing centroids; fall back to uniform random
                 chosenIdx = random.nextInt(sampleCnt);
             else {
-                // Sequential - inherently not parallelizable due to cumulative probability
+                // D-squared sampling: walk the cumulative distribution until
+                // the random threshold is exceeded. This step is inherently
+                // sequential because it depends on running cumulative sums.
                 float threshold = random.nextFloat() * totalWeight;
                 float cumulative = 0f;
                 chosenIdx = sampleCnt - 1;
@@ -87,7 +156,8 @@ final class KMeansUtils {
 
             System.arraycopy(data[chosenIdx], 0, centroids[c], 0, dimension);
 
-            // Parallelize distance update
+            // Update minDistances: for each point, keep the minimum distance across
+            // all centroids chosen so far. Only the new centroid can reduce the distance.
             float[] newCentroid = centroids[c];
             if (sampleCnt >= PARALLEL_THRESHOLD) {
                 IntStream.range(0, sampleCnt).parallel().forEach(i -> {
@@ -104,12 +174,28 @@ final class KMeansUtils {
             }
         }
 
+        // For cosine distance, centroids must lie on the unit sphere
         if (metricType == Metric.Type.COSINE_DISTANCE)
             normalizeCentroids(centroids);
 
         return centroids;
     }
 
+    /**
+     * Assigns each data point to the nearest centroid using brute-force linear scan.
+     *
+     * <p>Dispatches to the parallel implementation when the dataset size
+     * meets or exceeds {@link #PARALLEL_THRESHOLD}.</p>
+     *
+     * @param data         the input dataset
+     * @param centroids    the current centroid positions
+     * @param clusterCnt   the number of clusters
+     * @param labels       output array to receive per-point cluster assignments
+     * @param pointErrors  optional output array for per-point distances to assigned centroid; may be null
+     * @param clusterSizes optional output array for per-cluster membership counts; may be null
+     * @param distFn       the distance function to use
+     * @return the total loss (sum of all point-to-centroid distances)
+     */
     static float assignPointsToClusters(
         float[][] data,
         float[][] centroids,
@@ -134,6 +220,7 @@ final class KMeansUtils {
         for (int i = 0; i < sampleCnt; i++) {
             float[] point = data[i];
 
+            // Linear scan over all centroids to find the nearest one
             int nearestClusterIdx = 0;
             float nearestDistance = distFn.compute(point, centroids[0]);
 
@@ -159,6 +246,22 @@ final class KMeansUtils {
         return loss;
     }
 
+    /**
+     * Parallel implementation of nearest-centroid assignment.
+     *
+     * <p>Each point's assignment is computed independently in parallel. Cluster sizes
+     * are aggregated sequentially after parallel assignment to avoid atomic contention.
+     * Loss is computed via a parallel reduction over the per-point distances.</p>
+     *
+     * @param data         the input dataset
+     * @param centroids    the current centroid positions
+     * @param clusterCnt   the number of clusters
+     * @param labels       output array to receive per-point cluster assignments
+     * @param pointErrors  optional output for per-point distances; may be null
+     * @param clusterSizes optional output for per-cluster counts; may be null
+     * @param distFn       the distance function
+     * @return the total loss
+     */
     private static float assignPointsToClustersParallel(
         float[][] data,
         float[][] centroids,
@@ -170,7 +273,7 @@ final class KMeansUtils {
 
         int sampleCnt = data.length;
 
-        // Parallel assignment - each point is independent
+        // Each point is assigned independently; store per-point distances for later reduction
         float[] distances = new float[sampleCnt];
 
         IntStream.range(0, sampleCnt).parallel().forEach(i -> {
@@ -194,18 +297,34 @@ final class KMeansUtils {
                 pointErrors[i] = nearestDistance;
         });
 
-        // Compute cluster sizes sequentially (avoid atomic contention)
+        // Compute cluster sizes sequentially to avoid atomic contention on the counts array
         if (clusterSizes != null) {
             for (int i = 0; i < sampleCnt; i++)
                 clusterSizes[labels[i]]++;
         }
 
-        // Parallel reduction for loss using IntStream to sum distances
+        // Parallel reduction for total loss
         return (float) IntStream.range(0, sampleCnt).parallel()
             .mapToDouble(i -> distances[i])
             .sum();
     }
 
+    /**
+     * Recomputes centroids as the mean of all points assigned to each cluster.
+     *
+     * <p>For datasets exceeding {@link #PARALLEL_THRESHOLD}, accumulation is parallelized
+     * using thread-local buffers to avoid synchronization. The final averaging and optional
+     * L2 normalization (for cosine distance) are applied after accumulation.</p>
+     *
+     * @param data         the input dataset
+     * @param labels       per-point cluster assignments from the most recent assignment step
+     * @param newCentroids output array to receive the recomputed centroid positions;
+     *                     must be pre-allocated as {@code float[clusterCnt][dimension]}
+     * @param clusterSizes output array to receive per-cluster membership counts
+     * @param clusterCnt   the number of clusters
+     * @param dimension    the dimensionality of data points
+     * @param metricType   the metric type; centroids are L2-normalized if cosine distance
+     */
     static void recomputeCentroids(
         float[][] data,
         int[] labels,
@@ -217,6 +336,7 @@ final class KMeansUtils {
 
         int sampleCnt = data.length;
 
+        // Zero out accumulators before summing
         for (int c = 0; c < clusterCnt; c++) {
             Arrays.fill(newCentroids[c], 0);
             clusterSizes[c] = 0;
@@ -225,7 +345,7 @@ final class KMeansUtils {
         if (sampleCnt >= PARALLEL_THRESHOLD) {
             recomputeCentroidsParallel(data, labels, newCentroids, clusterSizes, clusterCnt, dimension);
         } else {
-            // Sequential path
+            // Sequential accumulation: sum all points belonging to each cluster
             for (int i = 0; i < sampleCnt; i++) {
                 int clusterIdx = labels[i];
                 clusterSizes[clusterIdx]++;
@@ -238,7 +358,7 @@ final class KMeansUtils {
             }
         }
 
-        // Final averaging
+        // Divide accumulated sums by cluster size to obtain the mean (centroid)
         for (int c = 0; c < clusterCnt; c++) {
             int size = clusterSizes[c];
             if (size > 0) {
@@ -249,10 +369,25 @@ final class KMeansUtils {
             }
         }
 
+        // For cosine distance, project centroids onto the unit sphere
         if (metricType == Metric.Type.COSINE_DISTANCE)
             normalizeCentroids(newCentroids);
     }
 
+    /**
+     * Parallel centroid recomputation using thread-local accumulators.
+     *
+     * <p>The data is partitioned into chunks (one per available processor). Each thread
+     * accumulates sums and counts into its own local buffer, eliminating the need for
+     * locks or atomics. Results are merged across threads per-cluster in parallel.</p>
+     *
+     * @param data         the input dataset
+     * @param labels       per-point cluster assignments
+     * @param newCentroids output array for centroid sums (to be averaged by the caller)
+     * @param clusterSizes output array for per-cluster counts
+     * @param clusterCnt   the number of clusters
+     * @param dimension    the dimensionality of data points
+     */
     private static void recomputeCentroidsParallel(
         float[][] data,
         int[] labels,
@@ -265,11 +400,11 @@ final class KMeansUtils {
         int numThreads = Runtime.getRuntime().availableProcessors();
         int chunkSize = (sampleCnt + numThreads - 1) / numThreads;
 
-        // Thread-local accumulators: [threadIdx][clusterIdx][dimension]
+        // Thread-local accumulators indexed as [threadIdx][clusterIdx][dimension]
         float[][][] localSums = new float[numThreads][clusterCnt][dimension];
         int[][] localCounts = new int[numThreads][clusterCnt];
 
-        // Parallel accumulation into thread-local buffers
+        // Each thread accumulates its data chunk into its own local buffers
         IntStream.range(0, numThreads).parallel().forEach(threadIdx -> {
             int start = threadIdx * chunkSize;
             int end = Math.min(start + chunkSize, sampleCnt);
@@ -289,7 +424,7 @@ final class KMeansUtils {
             }
         });
 
-        // Merge thread-local results (can be parallelized per cluster)
+        // Merge thread-local results into the shared output arrays (parallelized per cluster)
         IntStream.range(0, clusterCnt).parallel().forEach(c -> {
             float[] centroidSum = newCentroids[c];
             int totalCount = 0;
@@ -305,6 +440,35 @@ final class KMeansUtils {
         });
     }
 
+    /**
+     * Redistributes data points to fill empty clusters after centroid recomputation.
+     *
+     * <p>For each empty cluster, the algorithm attempts to "steal" a point from the
+     * largest non-empty cluster by choosing the point with the highest assignment error
+     * (distance to its current centroid). This prevents degenerate solutions where
+     * clusters vanish during iteration.</p>
+     *
+     * <p>The donor cluster's centroid is analytically updated by removing the stolen
+     * point's contribution, avoiding a full recomputation pass.</p>
+     *
+     * <p>Fallback strategy (in order):</p>
+     * <ol>
+     *   <li>Pick the highest-error point from the largest cluster.</li>
+     *   <li>Pick the globally highest-error point from any cluster.</li>
+     *   <li>Pick a random point (last resort).</li>
+     * </ol>
+     *
+     * @param data         the input dataset
+     * @param newCentroids the current centroid positions (modified in place for donor clusters)
+     * @param clusterSizes the current per-cluster membership counts (modified in place)
+     * @param labels       per-point cluster assignments (modified in place for reassigned points)
+     * @param pointErrors  per-point distances to assigned centroids
+     * @param taken        scratch boolean array to track already-reassigned points
+     * @param clusterCnt   the number of clusters
+     * @param dimension    the dimensionality of data points
+     * @param metricType   the metric type; donor centroids are re-normalized if cosine distance
+     * @param random       the RNG for fallback random point selection
+     */
     static void handleEmptyClusters(
         float[][] data,
         float[][] newCentroids,
@@ -324,11 +488,14 @@ final class KMeansUtils {
             if (clusterSizes[emptyCluster] != 0)
                 continue;
 
+            // Strategy 1: pick the highest-error point from the largest cluster
             int chosenIdx = choosePointFromLargestCluster(labels, clusterSizes, pointErrors, taken, clusterCnt);
 
+            // Strategy 2: pick the globally highest-error point from any cluster
             if (chosenIdx == -1)
                 chosenIdx = chooseGlobalWorstPoint(labels, pointErrors, taken);
 
+            // Strategy 3: fall back to a random point
             if (chosenIdx == -1)
                 chosenIdx = random.nextInt(sampleCnt);
 
@@ -337,9 +504,12 @@ final class KMeansUtils {
             int oldCluster = labels[chosenIdx];
             int oldSize = clusterSizes[oldCluster];
 
+            // Reassign the chosen point to the empty cluster
             labels[chosenIdx] = emptyCluster;
             clusterSizes[emptyCluster] = 1;
 
+            // Analytically update the donor cluster's centroid by removing the stolen point.
+            // new_centroid = (old_centroid * old_size - stolen_point) / (old_size - 1)
             if (oldCluster >= 0 && oldSize > 0) {
                 clusterSizes[oldCluster] = oldSize - 1;
 
@@ -354,10 +524,19 @@ final class KMeansUtils {
                 }
             }
 
+            // Set the empty cluster's centroid to the stolen point
             System.arraycopy(data[chosenIdx], 0, newCentroids[emptyCluster], 0, dimension);
         }
     }
 
+    /**
+     * Normalizes all centroids to unit length (L2 norm = 1).
+     *
+     * <p>Required for cosine distance so that inner-product-based distance computations
+     * remain valid. Parallelized when the number of centroids is 32 or more.</p>
+     *
+     * @param centroids the centroid array to normalize in place
+     */
     static void normalizeCentroids(float[][] centroids) {
         if (centroids.length >= 32) {
             IntStream.range(0, centroids.length).parallel()
@@ -368,6 +547,13 @@ final class KMeansUtils {
         }
     }
 
+    /**
+     * Normalizes a single vector to unit length (L2 norm = 1) in place.
+     *
+     * <p>If the vector has zero norm (all zeros), it is left unchanged.</p>
+     *
+     * @param centroid the vector to normalize
+     */
     static void normalizeSingleCentroid(float[] centroid) {
         float norm = 0f;
         for (float v : centroid)
@@ -380,6 +566,19 @@ final class KMeansUtils {
         }
     }
 
+    /**
+     * Selects the point with the highest assignment error from the largest cluster.
+     *
+     * <p>This is the primary strategy for filling empty clusters: steal the worst-fit
+     * point from the cluster that can most afford to lose a member.</p>
+     *
+     * @param labels       per-point cluster assignments
+     * @param clusterSizes per-cluster membership counts
+     * @param pointErrors  per-point distances to assigned centroids; may be null
+     * @param taken        boolean mask of already-reassigned points
+     * @param clusterCnt   the number of clusters
+     * @return the index of the chosen point, or -1 if no suitable point exists
+     */
     private static int choosePointFromLargestCluster(
         int[] labels,
         int[] clusterSizes,
@@ -387,6 +586,7 @@ final class KMeansUtils {
         boolean[] taken,
         int clusterCnt) {
 
+        // Find the cluster with the most members
         int largestCluster = -1;
         int maxSize = 0;
         for (int c = 0; c < clusterCnt; c++) {
@@ -395,6 +595,7 @@ final class KMeansUtils {
                 largestCluster = c;
             }
         }
+        // Cannot steal from a cluster with 0 or 1 members
         if (largestCluster < 0 || maxSize <= 1)
             return -1;
 
@@ -402,7 +603,7 @@ final class KMeansUtils {
         final int targetCluster = largestCluster;
 
         if (n >= PARALLEL_THRESHOLD) {
-            // Parallel argmax
+            // Parallel argmax: find the point in the target cluster with the highest error
             return IntStream.range(0, n).parallel()
                 .filter(i -> !taken[i] && labels[i] == targetCluster)
                 .boxed()
@@ -414,7 +615,7 @@ final class KMeansUtils {
                 .orElse(-1);
         }
 
-        // Sequential path
+        // Sequential argmax
         int bestIdx = -1;
         float bestError = -1f;
         for (int i = 0; i < n; i++) {
@@ -431,6 +632,17 @@ final class KMeansUtils {
         return bestIdx;
     }
 
+    /**
+     * Selects the point with the highest assignment error across all clusters.
+     *
+     * <p>This is the fallback strategy when no suitable point could be found
+     * in the largest cluster (e.g., all its points are already taken).</p>
+     *
+     * @param labels      per-point cluster assignments
+     * @param pointErrors per-point distances to assigned centroids; may be null
+     * @param taken       boolean mask of already-reassigned points
+     * @return the index of the chosen point, or -1 if no eligible point exists
+     */
     private static int chooseGlobalWorstPoint(
         int[] labels,
         float[] pointErrors,
@@ -439,7 +651,7 @@ final class KMeansUtils {
         int n = labels.length;
 
         if (n >= PARALLEL_THRESHOLD) {
-            // Parallel argmax
+            // Parallel argmax across all non-taken, assigned points
             return IntStream.range(0, n).parallel()
                 .filter(i -> !taken[i] && labels[i] >= 0)
                 .boxed()
@@ -451,7 +663,7 @@ final class KMeansUtils {
                 .orElse(-1);
         }
 
-        // Sequential path
+        // Sequential argmax
         int bestIdx = -1;
         float bestError = -1f;
 
@@ -471,9 +683,16 @@ final class KMeansUtils {
     }
 
     /**
-     * Computes pairwise distance matrix between all points.
-     * Useful for analysis and debugging.
-     * @return Symmetric distance matrix where result[i][j] = distance(points[i], points[j])
+     * Computes the full pairwise distance matrix between all points.
+     *
+     * <p>Only the upper triangle is computed; the lower triangle is mirrored
+     * (distance is symmetric). The diagonal is zero by definition. Parallelized
+     * when the number of points is 100 or more.</p>
+     *
+     * @param points the set of points (or centroids) to compare
+     * @param distFn the distance function to use
+     * @return a symmetric {@code float[n][n]} distance matrix where
+     *         {@code result[i][j] = distance(points[i], points[j])}
      */
     static float[][] computeDistanceMatrix(float[][] points, Metric.DistanceFunction distFn) {
         int n = points.length;
@@ -503,16 +722,41 @@ final class KMeansUtils {
     }
 
     /**
-     * Precomputes centroid-to-centroid distances for triangle inequality pruning.
-     * @return Distance matrix between all centroids
+     * Precomputes pairwise distances between all centroids for use with triangle
+     * inequality pruning in {@link #assignPointsToClustersWithPruning}.
+     *
+     * @param centroids the current centroid positions
+     * @param distFn    the distance function to use
+     * @return a symmetric distance matrix between all centroids
      */
     static float[][] precomputeCentroidDistances(float[][] centroids, Metric.DistanceFunction distFn) {
         return computeDistanceMatrix(centroids, distFn);
     }
 
     /**
-     * Assignment with triangle inequality pruning.
-     * Uses precomputed centroid distances to skip impossible clusters.
+     * Assigns each data point to the nearest centroid, using distance-based pruning
+     * to skip clusters that are likely not closer.
+     *
+     * <p>The pruning condition {@code d(a, b) > 2 * d(x, a)} is inspired by the
+     * triangle inequality from Elkan's accelerated KMeans. For true metric distances
+     * (e.g., L2), this condition guarantees that centroid b cannot be closer to x
+     * than centroid a. For non-metric distances used here (L2 squared, negated dot
+     * product), this is a heuristic that may occasionally skip a centroid that is
+     * actually closer. This is acceptable because pruning is only used in intermediate
+     * iterations -- the final assignment pass uses unpruned brute-force search.</p>
+     *
+     * <p>This optimization is most effective when the number of clusters is large
+     * (k >= 64), as it can eliminate a significant fraction of distance computations.</p>
+     *
+     * @param data              the input dataset
+     * @param centroids         the current centroid positions
+     * @param centroidDistances precomputed centroid-to-centroid distance matrix
+     * @param clusterCnt        the number of clusters
+     * @param labels            output array for per-point cluster assignments
+     * @param pointErrors       optional output for per-point distances; may be null
+     * @param clusterSizes      optional output for per-cluster counts; may be null
+     * @param distFn            the distance function
+     * @return the total loss
      */
     static float assignPointsToClustersWithPruning(
         float[][] data,
@@ -534,7 +778,7 @@ final class KMeansUtils {
                 data, centroids, centroidDistances, clusterCnt, labels, pointErrors, clusterSizes, distFn);
         }
 
-        // Sequential path with pruning
+        // Sequential path with triangle inequality pruning
         float loss = 0f;
 
         for (int i = 0; i < sampleCnt; i++) {
@@ -544,9 +788,8 @@ final class KMeansUtils {
             float nearestDistance = distFn.compute(point, centroids[0]);
 
             for (int c = 1; c < clusterCnt; c++) {
-                // Triangle inequality pruning:
-                // If d(centroid[nearest], centroid[c]) > 2 * d(point, centroid[nearest])
-                // then centroid[c] cannot be closer to point than centroid[nearest]
+                // Distance-based pruning: skip centroid c if it is likely farther.
+                // Exact for true metrics (L2); heuristic for L2 squared / dot product.
                 if (centroidDistances[nearestClusterIdx][c] > 2 * nearestDistance)
                     continue;
 
@@ -571,6 +814,23 @@ final class KMeansUtils {
         return loss;
     }
 
+    /**
+     * Parallel implementation of nearest-centroid assignment with triangle inequality pruning.
+     *
+     * <p>Follows the same pattern as {@link #assignPointsToClustersParallel}: each point is
+     * assigned independently in parallel, with sequential cluster-size aggregation and
+     * parallel loss reduction.</p>
+     *
+     * @param data              the input dataset
+     * @param centroids         the current centroid positions
+     * @param centroidDistances precomputed centroid-to-centroid distance matrix
+     * @param clusterCnt        the number of clusters
+     * @param labels            output array for per-point cluster assignments
+     * @param pointErrors       optional output for per-point distances; may be null
+     * @param clusterSizes      optional output for per-cluster counts; may be null
+     * @param distFn            the distance function
+     * @return the total loss
+     */
     private static float assignPointsToClustersWithPruningParallel(
         float[][] data,
         float[][] centroids,
@@ -591,7 +851,7 @@ final class KMeansUtils {
             float nearestDistance = distFn.compute(point, centroids[0]);
 
             for (int c = 1; c < clusterCnt; c++) {
-                // Triangle inequality pruning
+                // Distance-based pruning (same heuristic as sequential path)
                 if (centroidDistances[nearestClusterIdx][c] > 2 * nearestDistance)
                     continue;
 
@@ -609,13 +869,13 @@ final class KMeansUtils {
                 pointErrors[i] = nearestDistance;
         });
 
-        // Compute cluster sizes sequentially
+        // Compute cluster sizes sequentially to avoid atomic contention
         if (clusterSizes != null) {
             for (int i = 0; i < sampleCnt; i++)
                 clusterSizes[labels[i]]++;
         }
 
-        // Parallel reduction for loss
+        // Parallel reduction for total loss
         return (float) IntStream.range(0, sampleCnt).parallel()
             .mapToDouble(i -> distances[i])
             .sum();
